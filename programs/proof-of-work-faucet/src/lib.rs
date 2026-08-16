@@ -6,7 +6,7 @@ use anchor_lang::solana_program::{
 };
 use bs58::encode;
 
-declare_id!("PoWSNH2hEZogtCg1Zgm51FnkmJperzYDgPK4fvs8taL");
+declare_id!("7gHmWsbFKkomxnL33p7pKBqigEP8jxNivirHRcbMefuJ");
 
 pub fn create_account<'a, 'info>(
     payer: &'a AccountInfo<'info>,

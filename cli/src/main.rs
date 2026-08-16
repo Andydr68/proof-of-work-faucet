@@ -115,10 +115,12 @@ async fn main() -> anyhow::Result<()> {
 
     let genesis = client.get_genesis_hash().await?;
 
-    match genesis.to_string().as_str() {
-        "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" => {}
-        _ => anyhow::bail!("Genesis hash does not corespond to devnet"),
-    };
+    if !network_url.contains("localhost") && !network_url.contains("127.0.0.1") {
+        match genesis.to_string().as_str() {
+            "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" => {}
+            _ => anyhow::bail!("Genesis hash does not correspond to devnet"),
+        };
+    }
 
     match cli.subcommand {
         SubCommand::Create { difficulty, reward } => {
@@ -267,12 +269,13 @@ async fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            if client.get_balance(&payer.pubkey()).await? < 5000 {
-                // Try to request airdrop the normal way if the wallet is completely empty
-                client
-                    .request_airdrop(&payer.pubkey(), 1_000_000_000)
-                    .await?;
-            }
+            let payer_balance = client.get_balance(&payer.pubkey()).await?;
+    println!("DEBUG payer pubkey: {}", payer.pubkey());
+    println!("DEBUG balance seen by devnet-pow: {} lamports", payer_balance);
+
+    if payer_balance < 5000 {
+        println!("DEBUG: skipping automatic airdrop; wallet funded externally");
+    }
 
             // This variable is used to short circuit the loop if the grinded key is below the minimum prefix length
             let mut min_prefix_len = *faucet_specs
