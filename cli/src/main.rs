@@ -125,7 +125,16 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
+
+    let program_id: Pubkey =
+        if network_url.contains("localhost") || network_url.contains("127.0.0.1") {
+            proof_of_work_faucet::id()
+        } else {
+            "PoWSNH2hEZogtCg1Zgm51FnkmJperzYDgPK4fvs8taL".parse::<Pubkey>()?
+        };
+
     match cli.subcommand {
+
         SubCommand::Create { difficulty, reward } => {
             let amount: u64 = (reward * 1e9) as u64;
             let create_spec_data =
@@ -136,11 +145,11 @@ async fn main() -> anyhow::Result<()> {
                     difficulty.to_le_bytes().as_ref(),
                     amount.to_le_bytes().as_ref(),
                 ],
-                &proof_of_work_faucet::id(),
+                &program_id,
             );
             let (faucet, _) = Pubkey::find_program_address(
                 &[b"source", spec.as_ref()],
-                &proof_of_work_faucet::id(),
+                &program_id,
             );
             if client.get_account(&spec).await.is_ok() {
                 println!("Faucet already exists at {}", faucet);
@@ -153,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
             };
 
             let ix = Instruction {
-                program_id: proof_of_work_faucet::id(),
+                program_id: program_id,
                 accounts: create_accounts.to_account_metas(None),
                 data: create_spec_data,
             };
@@ -180,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
                 difficulty,
                 amount,
                 ..
-            } in get_all_faucets(&client, &commitment).await?.iter()
+            } in get_all_faucets(&client, &commitment, program_id).await?.iter()
             {
                 let reward = *amount as f64 / 1e9;
                 let balance = client
@@ -207,11 +216,11 @@ async fn main() -> anyhow::Result<()> {
                     difficulty.to_le_bytes().as_ref(),
                     amount.to_le_bytes().as_ref(),
                 ],
-                &proof_of_work_faucet::id(),
+                &program_id,
             );
             let (faucet, _) = Pubkey::find_program_address(
                 &[b"source", spec.as_ref()],
-                &proof_of_work_faucet::id(),
+                &program_id,
             );
             println!("Faucet address: {}", faucet);
 
@@ -241,11 +250,11 @@ async fn main() -> anyhow::Result<()> {
                                 d.to_le_bytes().as_ref(),
                                 reward_as_amount.to_le_bytes().as_ref(),
                             ],
-                            &proof_of_work_faucet::id(),
+                            &program_id,
                         );
                         let (faucet_pubkey, _) = Pubkey::find_program_address(
                             &[b"source", spec_pubkey.as_ref()],
-                            &proof_of_work_faucet::id(),
+                            &program_id,
                         );
 
                         let metadata = FaucetMetadata {
@@ -266,7 +275,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
-                get_inferred_faucets(&client, &commitment, difficulty, reward).await?
+                get_inferred_faucets(&client, &commitment, difficulty, reward, program_id).await?
             };
             if faucet_specs.is_empty() {
                 println!("No faucets found");
@@ -378,7 +387,7 @@ async fn main() -> anyhow::Result<()> {
                             signer.pubkey().as_ref(),
                             metadata.difficulty.to_le_bytes().as_ref(),
                         ],
-                        &proof_of_work_faucet::id(),
+                        &program_id,
                     );
                     let airdrop_accounts = proof_of_work_faucet::accounts::Airdrop {
                         payer: payer.pubkey(),
@@ -390,7 +399,7 @@ async fn main() -> anyhow::Result<()> {
                     };
 
                     let ix = Instruction {
-                        program_id: proof_of_work_faucet::id(),
+                        program_id: program_id,
                         accounts: airdrop_accounts.to_account_metas(None),
                         data: proof_of_work_faucet::instruction::Airdrop {}.data(),
                     };
@@ -431,6 +440,7 @@ async fn main() -> anyhow::Result<()> {
 async fn get_all_faucets(
     client: &RpcClient,
     commitment: &CommitmentConfig,
+    program_id: Pubkey,
 ) -> anyhow::Result<Vec<FaucetMetadata>> {
     let config = RpcProgramAccountsConfig {
         filters: Some(vec![RpcFilterType::DataSize(17)]),
@@ -442,14 +452,14 @@ async fn get_all_faucets(
         ..RpcProgramAccountsConfig::default()
     };
     let specs = client
-        .get_program_accounts_with_config(&proof_of_work_faucet::id(), config)
+        .get_program_accounts_with_config(&program_id, config)
         .await?
         .iter()
         .filter_map(|(pubkey, account)| {
             let difficulty = Difficulty::try_from_slice(&account.data[8..]).ok()?;
             let (faucet, _) = Pubkey::find_program_address(
                 &[b"source", pubkey.as_ref()],
-                &proof_of_work_faucet::id(),
+                &program_id,
             );
             Some(FaucetMetadata {
                 spec_pubkey: *pubkey,
@@ -467,8 +477,9 @@ async fn get_inferred_faucets(
     commitment: &CommitmentConfig,
     difficulty: Option<u8>,
     reward: Option<f64>,
+    program_id: Pubkey,
 ) -> anyhow::Result<BTreeMap<u8, BTreeMap<u64, FaucetMetadata>>> {
-    let mut faucet_specs = get_all_faucets(client, commitment)
+    let mut faucet_specs = get_all_faucets(client, commitment, program_id)
         .await?
         .iter()
         .filter(|spec_metadata| {
