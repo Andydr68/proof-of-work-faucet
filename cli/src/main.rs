@@ -274,11 +274,8 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let payer_balance = client.get_balance(&payer.pubkey()).await?;
-    println!("DEBUG payer pubkey: {}", payer.pubkey());
-    println!("DEBUG balance seen by devnet-pow: {} lamports", payer_balance);
 
     if payer_balance < 5000 {
-        println!("DEBUG: skipping automatic airdrop; wallet funded externally");
     }
 
             // This variable is used to short circuit the loop if the grinded key is below the minimum prefix length
