@@ -83,6 +83,9 @@ enum SubCommand {
         /// Target number of lamports to mine for
         #[clap(short, long, default_value = "10000000000")]
         target_lamports: u64,
+        /// Stop after this many successful rewards
+        #[clap(long)]
+        max_rewards: Option<u64>,
         /// Do not search for faucets automatically
         #[clap(long, default_value = "false")]
         no_infer: bool,
@@ -223,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
             difficulty,
             reward,
             target_lamports,
+            max_rewards,
             no_infer,
         } => {
             let mut faucet_specs = if no_infer {
@@ -287,8 +291,11 @@ async fn main() -> anyhow::Result<()> {
             println!("Setup complete! Starting mining process...");
             println!();
             let mut airdropped_amount = 0;
+            let mut rewards_received: u64 = 0;
 
-            while airdropped_amount < target_lamports {
+            while airdropped_amount < target_lamports
+                && max_rewards.map_or(true, |limit| rewards_received < limit)
+            {
                 let signer = Keypair::new();
 
                 let prefix_len = encode(signer.pubkey().as_ref())
@@ -409,6 +416,7 @@ async fn main() -> anyhow::Result<()> {
                                 reward, metadata.faucet_pubkey, txid
                             );
                             airdropped_amount += metadata.amount;
+                        rewards_received += 1;
                             matched_difficulties.push(metadata.difficulty);
                         }
                         Err(e) => {
