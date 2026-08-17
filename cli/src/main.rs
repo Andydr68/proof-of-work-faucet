@@ -1,4 +1,8 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
 
 use anchor_lang::InstructionData;
 use anchor_lang::ToAccountMetas;
@@ -98,6 +102,74 @@ enum SubCommand {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct DifficultyPerformance {
+    claims: u64,
+    total_seconds: f64,
+    gross_lamports: u64,
+}
+
+impl DifficultyPerformance {
+    fn average_seconds(&self) -> Option<f64> {
+        if self.claims == 0 {
+            None
+        } else {
+            Some(self.total_seconds / self.claims as f64)
+        }
+    }
+
+    fn sol_per_second(&self) -> Option<f64> {
+        if self.total_seconds <= 0.0 {
+            None
+        } else {
+            Some((self.gross_lamports as f64 / 1e9) / self.total_seconds)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PerformanceHistory {
+    difficulties: BTreeMap<u8, DifficultyPerformance>,
+}
+
+fn performance_history_path() -> PathBuf {
+    PathBuf::from(".devnet-pow-performance.json")
+}
+
+fn load_performance_history() -> PerformanceHistory {
+    let path = performance_history_path();
+
+    match fs::read_to_string(&path) {
+        Ok(contents) => match serde_json::from_str(&contents) {
+            Ok(history) => history,
+            Err(e) => {
+                eprintln!(
+                    "Warning: could not parse performance history {}: {}",
+                    path.display(),
+                    e
+                );
+                PerformanceHistory::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => PerformanceHistory::default(),
+        Err(e) => {
+            eprintln!(
+                "Warning: could not read performance history {}: {}",
+                path.display(),
+                e
+            );
+            PerformanceHistory::default()
+        }
+    }
+}
+
+fn save_performance_history(history: &PerformanceHistory) -> anyhow::Result<()> {
+    let path = performance_history_path();
+    let json = serde_json::to_string_pretty(history)?;
+    fs::write(&path, json)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FaucetMetadata {
     pub spec_pubkey: Pubkey,
@@ -131,7 +203,6 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
-
     let program_id: Pubkey =
         if network_url.contains("localhost") || network_url.contains("127.0.0.1") {
             proof_of_work_faucet::id()
@@ -140,7 +211,6 @@ async fn main() -> anyhow::Result<()> {
         };
 
     match cli.subcommand {
-
         SubCommand::Create { difficulty, reward } => {
             let amount: u64 = (reward * 1e9) as u64;
             let create_spec_data =
@@ -153,10 +223,8 @@ async fn main() -> anyhow::Result<()> {
                 ],
                 &program_id,
             );
-            let (faucet, _) = Pubkey::find_program_address(
-                &[b"source", spec.as_ref()],
-                &program_id,
-            );
+            let (faucet, _) =
+                Pubkey::find_program_address(&[b"source", spec.as_ref()], &program_id);
             if client.get_account(&spec).await.is_ok() {
                 println!("Faucet already exists at {}", faucet);
                 return Ok(());
@@ -195,7 +263,9 @@ async fn main() -> anyhow::Result<()> {
                 difficulty,
                 amount,
                 ..
-            } in get_all_faucets(&client, &commitment, program_id).await?.iter()
+            } in get_all_faucets(&client, &commitment, program_id)
+                .await?
+                .iter()
             {
                 let reward = *amount as f64 / 1e9;
                 let balance = client
@@ -224,10 +294,8 @@ async fn main() -> anyhow::Result<()> {
                 ],
                 &program_id,
             );
-            let (faucet, _) = Pubkey::find_program_address(
-                &[b"source", spec.as_ref()],
-                &program_id,
-            );
+            let (faucet, _) =
+                Pubkey::find_program_address(&[b"source", spec.as_ref()], &program_id);
             println!("Faucet address: {}", faucet);
 
             let balance = client
@@ -246,14 +314,13 @@ async fn main() -> anyhow::Result<()> {
             best,
             no_infer,
         } => {
+            let mut persistent_history = load_performance_history();
+
             let mut faucet_specs = if best {
-                let selected = select_best_faucet(
-                    &client,
-                    &commitment,
-                    program_id,
-                )
-                .await?
-                .ok_or_else(|| anyhow!("No funded faucets found"))?;
+                let selected =
+                    select_best_faucet(&client, &commitment, program_id, &persistent_history)
+                        .await?
+                        .ok_or_else(|| anyhow!("No funded faucets found"))?;
 
                 println!(
                     "Best faucet selected: {} | difficulty {} | reward {} SOL",
@@ -266,10 +333,7 @@ async fn main() -> anyhow::Result<()> {
                 specs_for_difficulty.insert(selected.amount, selected);
 
                 let mut faucet_specs = BTreeMap::new();
-                faucet_specs.insert(
-                    selected.difficulty,
-                    specs_for_difficulty,
-                );
+                faucet_specs.insert(selected.difficulty, specs_for_difficulty);
                 faucet_specs
             } else if no_infer {
                 let mut faucet_specs = BTreeMap::new();
@@ -317,8 +381,7 @@ async fn main() -> anyhow::Result<()> {
 
             let payer_balance = client.get_balance(&payer.pubkey()).await?;
 
-    if payer_balance < 5000 {
-    }
+            if payer_balance < 5000 {}
 
             // This variable is used to short circuit the loop if the grinded key is below the minimum prefix length
             let mut min_prefix_len = *faucet_specs
@@ -411,11 +474,12 @@ async fn main() -> anyhow::Result<()> {
                                     min_prefix_len = min;
                                 } else if best {
                                     println!("No faucets remaining locally; rescanning...");
-                                
+
                                     match select_best_faucet(
                                         &client,
                                         &commitment,
                                         program_id,
+                                        &persistent_history,
                                     )
                                     .await?
                                     {
@@ -426,15 +490,13 @@ async fn main() -> anyhow::Result<()> {
                                                 selected.difficulty,
                                                 selected.amount as f64 / 1e9
                                             );
-                                
+
                                             let mut specs_for_difficulty = BTreeMap::new();
                                             specs_for_difficulty.insert(selected.amount, selected);
-                                
+
                                             faucet_specs.clear();
-                                            faucet_specs.insert(
-                                                selected.difficulty,
-                                                specs_for_difficulty,
-                                            );
+                                            faucet_specs
+                                                .insert(selected.difficulty, specs_for_difficulty);
                                             min_prefix_len = selected.difficulty;
                                         }
                                         None => {
@@ -493,59 +555,57 @@ async fn main() -> anyhow::Result<()> {
                                 reward, metadata.faucet_pubkey, txid
                             );
                             airdropped_amount += metadata.amount;
-                        rewards_received += 1;
-                        gross_rewards_lamports += metadata.amount;
-                        let reward_elapsed = last_reward_at.elapsed().as_secs_f64();
-                        let stats = performance_stats
-                            .entry(metadata.difficulty)
-                            .or_insert((0, 0.0, 0));
-                        stats.0 += 1;
-                        stats.1 += reward_elapsed;
-                        stats.2 += metadata.amount;
-                        last_reward_at = std::time::Instant::now();
-                        if best
-                            && rescan_every
-                                .map_or(false, |interval| {
+                            rewards_received += 1;
+                            gross_rewards_lamports += metadata.amount;
+                            let reward_elapsed = last_reward_at.elapsed().as_secs_f64();
+                            let stats = performance_stats
+                                .entry(metadata.difficulty)
+                                .or_insert((0, 0.0, 0));
+                            stats.0 += 1;
+                            stats.1 += reward_elapsed;
+                            stats.2 += metadata.amount;
+                            last_reward_at = std::time::Instant::now();
+                            if best
+                                && rescan_every.map_or(false, |interval| {
                                     interval > 0 && rewards_received % interval == 0
                                 })
-                        {
-                            println!("Periodic best-faucet rescan after {} rewards...", rewards_received);
-                        
-                            match select_best_faucet(
-                                &client,
-                                &commitment,
-                                program_id,
-                            )
-                            .await?
                             {
-                                Some(selected) => {
-                                    println!(
-                                        "Best faucet now: {} | difficulty {} | reward {} SOL",
-                                        selected.faucet_pubkey,
-                                        selected.difficulty,
-                                        selected.amount as f64 / 1e9
-                                    );
-                        
-                                    let mut specs_for_difficulty = BTreeMap::new();
-                                    specs_for_difficulty.insert(
-                                        selected.amount,
-                                        selected,
-                                    );
-                        
-                                    faucet_specs.clear();
-                                    faucet_specs.insert(
-                                        selected.difficulty,
-                                        specs_for_difficulty,
-                                    );
-                        
-                                    min_prefix_len = selected.difficulty;
-                                }
-                                None => {
-                                    println!("No funded faucets found during periodic rescan");
-                                    break 'mining;
+                                println!(
+                                    "Periodic best-faucet rescan after {} rewards...",
+                                    rewards_received
+                                );
+
+                                match select_best_faucet(
+                                    &client,
+                                    &commitment,
+                                    program_id,
+                                    &persistent_history,
+                                )
+                                .await?
+                                {
+                                    Some(selected) => {
+                                        println!(
+                                            "Best faucet now: {} | difficulty {} | reward {} SOL",
+                                            selected.faucet_pubkey,
+                                            selected.difficulty,
+                                            selected.amount as f64 / 1e9
+                                        );
+
+                                        let mut specs_for_difficulty = BTreeMap::new();
+                                        specs_for_difficulty.insert(selected.amount, selected);
+
+                                        faucet_specs.clear();
+                                        faucet_specs
+                                            .insert(selected.difficulty, specs_for_difficulty);
+
+                                        min_prefix_len = selected.difficulty;
+                                    }
+                                    None => {
+                                        println!("No funded faucets found during periodic rescan");
+                                        break 'mining;
+                                    }
                                 }
                             }
-                        }
                             matched_difficulties.push(metadata.difficulty);
                         }
                         Err(e) => {
@@ -558,8 +618,7 @@ async fn main() -> anyhow::Result<()> {
             let final_balance = client.get_balance(&payer.pubkey()).await?;
             let elapsed = session_started.elapsed();
             let net_change_lamports = final_balance as i128 - starting_balance as i128;
-            let session_cost_lamports =
-                gross_rewards_lamports as i128 - net_change_lamports;
+            let session_cost_lamports = gross_rewards_lamports as i128 - net_change_lamports;
 
             println!();
             println!("=== Session summary ===");
@@ -568,14 +627,8 @@ async fn main() -> anyhow::Result<()> {
                 "Gross rewards: {:.9} SOL",
                 gross_rewards_lamports as f64 / 1e9
             );
-            println!(
-                "Starting balance: {:.9} SOL",
-                starting_balance as f64 / 1e9
-            );
-            println!(
-                "Final balance: {:.9} SOL",
-                final_balance as f64 / 1e9
-            );
+            println!("Starting balance: {:.9} SOL", starting_balance as f64 / 1e9);
+            println!("Final balance: {:.9} SOL", final_balance as f64 / 1e9);
             println!(
                 "Net balance change: {:.9} SOL",
                 net_change_lamports as f64 / 1e9
@@ -592,19 +645,18 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
-
             println!();
             println!("=== Measured profitability ===");
             for (difficulty, (claims, seconds, lamports)) in &performance_stats {
                 if *claims == 0 || *seconds <= 0.0 {
                     continue;
                 }
-            
+
                 let avg_seconds = *seconds / *claims as f64;
                 let gross_sol = *lamports as f64 / 1e9;
                 let sol_per_second = gross_sol / *seconds;
                 let sol_per_hour = sol_per_second * 3600.0;
-            
+
                 println!(
                     "Difficulty {} | claims {} | avg {:.3} s | gross {:.9} SOL | {:.9} SOL/s | {:.6} SOL/h",
                     difficulty,
@@ -616,29 +668,60 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
+            // Merge session measurements into persistent history
+            for (difficulty, (claims, seconds, lamports)) in &performance_stats {
+                let history = persistent_history
+                    .difficulties
+                    .entry(*difficulty)
+                    .or_default();
+
+                history.claims += *claims;
+                history.total_seconds += *seconds;
+                history.gross_lamports += *lamports;
+            }
+
+            save_performance_history(&persistent_history)?;
+            println!(
+                "Performance history saved to {}",
+                performance_history_path().display()
+            );
+
             Ok(())
         }
     }
 }
 
-
 async fn select_best_faucet(
     client: &RpcClient,
     commitment: &CommitmentConfig,
     program_id: Pubkey,
+    history: &PerformanceHistory,
 ) -> anyhow::Result<Option<FaucetMetadata>> {
-    let all_faucets =
-        get_all_faucets(client, commitment, program_id).await?;
+    let all_faucets = get_all_faucets(client, commitment, program_id).await?;
 
     let mut best_faucet: Option<FaucetMetadata> = None;
     let mut best_score = f64::NEG_INFINITY;
 
+    // Calibrate theoretical work against measured mining performance.
+    let mut calibrated_seconds = 0.0_f64;
+    let mut calibrated_work = 0.0_f64;
+
+    for (difficulty, perf) in &history.difficulties {
+        if perf.claims >= 5 && perf.total_seconds > 0.0 {
+            calibrated_seconds += perf.total_seconds;
+            calibrated_work += perf.claims as f64 * 58_f64.powi(*difficulty as i32);
+        }
+    }
+
+    let seconds_per_work_unit = if calibrated_work > 0.0 {
+        Some(calibrated_seconds / calibrated_work)
+    } else {
+        None
+    };
+
     for metadata in all_faucets {
         let balance = client
-            .get_balance_with_commitment(
-                &metadata.faucet_pubkey,
-                *commitment,
-            )
+            .get_balance_with_commitment(&metadata.faucet_pubkey, *commitment)
             .await?
             .value;
 
@@ -646,9 +729,33 @@ async fn select_best_faucet(
             continue;
         }
 
-        let score =
-            metadata.amount as f64
-            / 58_f64.powi(metadata.difficulty as i32);
+        let reward_sol = metadata.amount as f64 / 1e9;
+
+        let predicted_seconds = match history.difficulties.get(&metadata.difficulty) {
+            Some(perf) if perf.claims >= 5 => perf.average_seconds(),
+            _ => seconds_per_work_unit
+                .map(|seconds_per_unit| seconds_per_unit * 58_f64.powi(metadata.difficulty as i32)),
+        };
+
+        let score = match predicted_seconds {
+            Some(seconds) if seconds > 0.0 => {
+                let sol_per_second = reward_sol / seconds;
+
+                println!(
+                    "Profit estimate: difficulty {} | reward {:.9} SOL | {:.3}s expected | {:.9} SOL/s",
+                    metadata.difficulty,
+                    reward_sol,
+                    seconds,
+                    sol_per_second
+                );
+
+                sol_per_second
+            }
+            _ => {
+                // No sufficient measured history yet.
+                metadata.amount as f64 / 58_f64.powi(metadata.difficulty as i32)
+            }
+        };
 
         if score > best_score {
             best_score = score;
@@ -679,10 +786,8 @@ async fn get_all_faucets(
         .iter()
         .filter_map(|(pubkey, account)| {
             let difficulty = Difficulty::try_from_slice(&account.data[8..]).ok()?;
-            let (faucet, _) = Pubkey::find_program_address(
-                &[b"source", pubkey.as_ref()],
-                &program_id,
-            );
+            let (faucet, _) =
+                Pubkey::find_program_address(&[b"source", pubkey.as_ref()], &program_id);
             Some(FaucetMetadata {
                 spec_pubkey: *pubkey,
                 faucet_pubkey: faucet,
