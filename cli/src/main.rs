@@ -243,37 +243,13 @@ async fn main() -> anyhow::Result<()> {
             no_infer,
         } => {
             let mut faucet_specs = if best {
-                let all_faucets =
-                    get_all_faucets(&client, &commitment, program_id).await?;
-
-                let mut best_faucet: Option<FaucetMetadata> = None;
-                let mut best_score = f64::NEG_INFINITY;
-
-                for metadata in all_faucets {
-                    let balance = client
-                        .get_balance_with_commitment(
-                            &metadata.faucet_pubkey,
-                            commitment,
-                        )
-                        .await?
-                        .value;
-
-                    if balance < metadata.amount || metadata.amount < 895880 {
-                        continue;
-                    }
-
-                    let score =
-                        metadata.amount as f64
-                        / 58_f64.powi(metadata.difficulty as i32);
-
-                    if score > best_score {
-                        best_score = score;
-                        best_faucet = Some(metadata);
-                    }
-                }
-
-                let selected = best_faucet
-                    .ok_or_else(|| anyhow!("No funded faucets found"))?;
+                let selected = select_best_faucet(
+                    &client,
+                    &commitment,
+                    program_id,
+                )
+                .await?
+                .ok_or_else(|| anyhow!("No funded faucets found"))?;
 
                 println!(
                     "Best faucet selected: {} | difficulty {} | reward {} SOL",
@@ -286,7 +262,10 @@ async fn main() -> anyhow::Result<()> {
                 specs_for_difficulty.insert(selected.amount, selected);
 
                 let mut faucet_specs = BTreeMap::new();
-                faucet_specs.insert(selected.difficulty, specs_for_difficulty);
+                faucet_specs.insert(
+                    selected.difficulty,
+                    specs_for_difficulty,
+                );
                 faucet_specs
             } else if no_infer {
                 let mut faucet_specs = BTreeMap::new();
@@ -352,7 +331,7 @@ async fn main() -> anyhow::Result<()> {
             let starting_balance = payer_balance;
             let mut gross_rewards_lamports: u64 = 0;
 
-            while airdropped_amount < target_lamports
+            'mining: while airdropped_amount < target_lamports
                 && max_rewards.map_or(true, |limit| rewards_received < limit)
             {
                 let signer = Keypair::new();
@@ -421,13 +400,45 @@ async fn main() -> anyhow::Result<()> {
                         if faucet_specs.get(&metadata.difficulty).unwrap().is_empty() {
                             faucet_specs.remove(&metadata.difficulty);
                             if metadata.difficulty == min_prefix_len {
-                                min_prefix_len = match faucet_specs.keys().min() {
-                                    Some(min) => *min,
-                                    None => {
-                                        println!("No faucets remaining");
-                                        return Ok(());
+                                if let Some(min) = faucet_specs.keys().min().copied() {
+                                    min_prefix_len = min;
+                                } else if best {
+                                    println!("No faucets remaining locally; rescanning...");
+                                
+                                    match select_best_faucet(
+                                        &client,
+                                        &commitment,
+                                        program_id,
+                                    )
+                                    .await?
+                                    {
+                                        Some(selected) => {
+                                            println!(
+                                                "New best faucet selected: {} | difficulty {} | reward {} SOL",
+                                                selected.faucet_pubkey,
+                                                selected.difficulty,
+                                                selected.amount as f64 / 1e9
+                                            );
+                                
+                                            let mut specs_for_difficulty = BTreeMap::new();
+                                            specs_for_difficulty.insert(selected.amount, selected);
+                                
+                                            faucet_specs.clear();
+                                            faucet_specs.insert(
+                                                selected.difficulty,
+                                                specs_for_difficulty,
+                                            );
+                                            min_prefix_len = selected.difficulty;
+                                        }
+                                        None => {
+                                            println!("No funded faucets found after rescan");
+                                            break 'mining;
+                                        }
                                     }
-                                };
+                                } else {
+                                    println!("No faucets remaining");
+                                    break 'mining;
+                                }
                             }
                         }
                         continue;
@@ -526,6 +537,44 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+
+async fn select_best_faucet(
+    client: &RpcClient,
+    commitment: &CommitmentConfig,
+    program_id: Pubkey,
+) -> anyhow::Result<Option<FaucetMetadata>> {
+    let all_faucets =
+        get_all_faucets(client, commitment, program_id).await?;
+
+    let mut best_faucet: Option<FaucetMetadata> = None;
+    let mut best_score = f64::NEG_INFINITY;
+
+    for metadata in all_faucets {
+        let balance = client
+            .get_balance_with_commitment(
+                &metadata.faucet_pubkey,
+                *commitment,
+            )
+            .await?
+            .value;
+
+        if balance < metadata.amount || metadata.amount < 895880 {
+            continue;
+        }
+
+        let score =
+            metadata.amount as f64
+            / 58_f64.powi(metadata.difficulty as i32);
+
+        if score > best_score {
+            best_score = score;
+            best_faucet = Some(metadata);
+        }
+    }
+
+    Ok(best_faucet)
 }
 
 async fn get_all_faucets(
