@@ -86,6 +86,9 @@ enum SubCommand {
         /// Stop after this many successful rewards
         #[clap(long)]
         max_rewards: Option<u64>,
+        /// Force a best-faucet rescan after N successful rewards (testing)
+        #[clap(long)]
+        force_rescan_after: Option<u64>,
         /// Automatically select the most efficient funded faucet
         #[clap(long, default_value = "false")]
         best: bool,
@@ -239,6 +242,7 @@ async fn main() -> anyhow::Result<()> {
             reward,
             target_lamports,
             max_rewards,
+            force_rescan_after,
             best,
             no_infer,
         } => {
@@ -488,6 +492,40 @@ async fn main() -> anyhow::Result<()> {
                             airdropped_amount += metadata.amount;
                         rewards_received += 1;
                         gross_rewards_lamports += metadata.amount;
+                        if best
+                            && force_rescan_after
+                                .map_or(false, |limit| rewards_received == limit)
+                        {
+                            println!("TEST: forcing best-faucet rescan after {} rewards", rewards_received);
+                        
+                            if let Some(selected) = select_best_faucet(
+                                &client,
+                                &commitment,
+                                program_id,
+                            )
+                            .await?
+                            {
+                                println!(
+                                    "Rescan selected: {} | difficulty {} | reward {} SOL",
+                                    selected.faucet_pubkey,
+                                    selected.difficulty,
+                                    selected.amount as f64 / 1e9
+                                );
+                        
+                                let mut specs_for_difficulty = BTreeMap::new();
+                                specs_for_difficulty.insert(selected.amount, selected);
+                        
+                                faucet_specs.clear();
+                                faucet_specs.insert(
+                                    selected.difficulty,
+                                    specs_for_difficulty,
+                                );
+                                min_prefix_len = selected.difficulty;
+                            } else {
+                                println!("TEST: rescan found no funded faucets");
+                                break 'mining;
+                            }
+                        }
                             matched_difficulties.push(metadata.difficulty);
                         }
                         Err(e) => {
