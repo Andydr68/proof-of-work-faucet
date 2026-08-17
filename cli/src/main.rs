@@ -348,6 +348,9 @@ async fn main() -> anyhow::Result<()> {
             println!();
             let mut airdropped_amount = 0;
             let mut rewards_received: u64 = 0;
+            let session_started = std::time::Instant::now();
+            let starting_balance = payer_balance;
+            let mut gross_rewards_lamports: u64 = 0;
 
             while airdropped_amount < target_lamports
                 && max_rewards.map_or(true, |limit| rewards_received < limit)
@@ -473,6 +476,7 @@ async fn main() -> anyhow::Result<()> {
                             );
                             airdropped_amount += metadata.amount;
                         rewards_received += 1;
+                        gross_rewards_lamports += metadata.amount;
                             matched_difficulties.push(metadata.difficulty);
                         }
                         Err(e) => {
@@ -482,6 +486,43 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            let final_balance = client.get_balance(&payer.pubkey()).await?;
+            let elapsed = session_started.elapsed();
+            let net_change_lamports = final_balance as i128 - starting_balance as i128;
+            let session_cost_lamports =
+                gross_rewards_lamports as i128 - net_change_lamports;
+
+            println!();
+            println!("=== Session summary ===");
+            println!("Rewards received: {}", rewards_received);
+            println!(
+                "Gross rewards: {:.9} SOL",
+                gross_rewards_lamports as f64 / 1e9
+            );
+            println!(
+                "Starting balance: {:.9} SOL",
+                starting_balance as f64 / 1e9
+            );
+            println!(
+                "Final balance: {:.9} SOL",
+                final_balance as f64 / 1e9
+            );
+            println!(
+                "Net balance change: {:.9} SOL",
+                net_change_lamports as f64 / 1e9
+            );
+            println!(
+                "Session cost: {:.9} SOL",
+                session_cost_lamports as f64 / 1e9
+            );
+            println!("Elapsed time: {:.3} s", elapsed.as_secs_f64());
+            if rewards_received > 0 {
+                println!(
+                    "Average time per reward: {:.3} s",
+                    elapsed.as_secs_f64() / rewards_received as f64
+                );
+            }
+
             Ok(())
         }
     }
