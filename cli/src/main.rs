@@ -334,6 +334,9 @@ async fn main() -> anyhow::Result<()> {
             let session_started = std::time::Instant::now();
             let starting_balance = payer_balance;
             let mut gross_rewards_lamports: u64 = 0;
+            // difficulty -> (claims, total_seconds, gross_lamports)
+            let mut performance_stats: BTreeMap<u8, (u64, f64, u64)> = BTreeMap::new();
+            let mut last_reward_at = std::time::Instant::now();
 
             'mining: while airdropped_amount < target_lamports
                 && max_rewards.map_or(true, |limit| rewards_received < limit)
@@ -492,6 +495,14 @@ async fn main() -> anyhow::Result<()> {
                             airdropped_amount += metadata.amount;
                         rewards_received += 1;
                         gross_rewards_lamports += metadata.amount;
+                        let reward_elapsed = last_reward_at.elapsed().as_secs_f64();
+                        let stats = performance_stats
+                            .entry(metadata.difficulty)
+                            .or_insert((0, 0.0, 0));
+                        stats.0 += 1;
+                        stats.1 += reward_elapsed;
+                        stats.2 += metadata.amount;
+                        last_reward_at = std::time::Instant::now();
                         if best
                             && rescan_every
                                 .map_or(false, |interval| {
@@ -578,6 +589,30 @@ async fn main() -> anyhow::Result<()> {
                 println!(
                     "Average time per reward: {:.3} s",
                     elapsed.as_secs_f64() / rewards_received as f64
+                );
+            }
+
+
+            println!();
+            println!("=== Measured profitability ===");
+            for (difficulty, (claims, seconds, lamports)) in &performance_stats {
+                if *claims == 0 || *seconds <= 0.0 {
+                    continue;
+                }
+            
+                let avg_seconds = *seconds / *claims as f64;
+                let gross_sol = *lamports as f64 / 1e9;
+                let sol_per_second = gross_sol / *seconds;
+                let sol_per_hour = sol_per_second * 3600.0;
+            
+                println!(
+                    "Difficulty {} | claims {} | avg {:.3} s | gross {:.9} SOL | {:.9} SOL/s | {:.6} SOL/h",
+                    difficulty,
+                    claims,
+                    avg_seconds,
+                    gross_sol,
+                    sol_per_second,
+                    sol_per_hour
                 );
             }
 
