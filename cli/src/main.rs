@@ -86,6 +86,9 @@ enum SubCommand {
         /// Stop after this many successful rewards
         #[clap(long)]
         max_rewards: Option<u64>,
+        /// Re-evaluate the best faucet every N successful rewards
+        #[clap(long)]
+        rescan_every: Option<u64>,
         /// Automatically select the most efficient funded faucet
         #[clap(long, default_value = "false")]
         best: bool,
@@ -239,6 +242,7 @@ async fn main() -> anyhow::Result<()> {
             reward,
             target_lamports,
             max_rewards,
+            rescan_every,
             best,
             no_infer,
         } => {
@@ -488,6 +492,49 @@ async fn main() -> anyhow::Result<()> {
                             airdropped_amount += metadata.amount;
                         rewards_received += 1;
                         gross_rewards_lamports += metadata.amount;
+                        if best
+                            && rescan_every
+                                .map_or(false, |interval| {
+                                    interval > 0 && rewards_received % interval == 0
+                                })
+                        {
+                            println!("Periodic best-faucet rescan after {} rewards...", rewards_received);
+                        
+                            match select_best_faucet(
+                                &client,
+                                &commitment,
+                                program_id,
+                            )
+                            .await?
+                            {
+                                Some(selected) => {
+                                    println!(
+                                        "Best faucet now: {} | difficulty {} | reward {} SOL",
+                                        selected.faucet_pubkey,
+                                        selected.difficulty,
+                                        selected.amount as f64 / 1e9
+                                    );
+                        
+                                    let mut specs_for_difficulty = BTreeMap::new();
+                                    specs_for_difficulty.insert(
+                                        selected.amount,
+                                        selected,
+                                    );
+                        
+                                    faucet_specs.clear();
+                                    faucet_specs.insert(
+                                        selected.difficulty,
+                                        specs_for_difficulty,
+                                    );
+                        
+                                    min_prefix_len = selected.difficulty;
+                                }
+                                None => {
+                                    println!("No funded faucets found during periodic rescan");
+                                    break 'mining;
+                                }
+                            }
+                        }
                             matched_difficulties.push(metadata.difficulty);
                         }
                         Err(e) => {
