@@ -86,6 +86,9 @@ enum SubCommand {
         /// Stop after this many successful rewards
         #[clap(long)]
         max_rewards: Option<u64>,
+        /// Automatically select the most efficient funded faucet
+        #[clap(long, default_value = "false")]
+        best: bool,
         /// Do not search for faucets automatically
         #[clap(long, default_value = "false")]
         no_infer: bool,
@@ -236,9 +239,56 @@ async fn main() -> anyhow::Result<()> {
             reward,
             target_lamports,
             max_rewards,
+            best,
             no_infer,
         } => {
-            let mut faucet_specs = if no_infer {
+            let mut faucet_specs = if best {
+                let all_faucets =
+                    get_all_faucets(&client, &commitment, program_id).await?;
+
+                let mut best_faucet: Option<FaucetMetadata> = None;
+                let mut best_score = f64::NEG_INFINITY;
+
+                for metadata in all_faucets {
+                    let balance = client
+                        .get_balance_with_commitment(
+                            &metadata.faucet_pubkey,
+                            commitment,
+                        )
+                        .await?
+                        .value;
+
+                    if balance < metadata.amount || metadata.amount < 895880 {
+                        continue;
+                    }
+
+                    let score =
+                        metadata.amount as f64
+                        / 58_f64.powi(metadata.difficulty as i32);
+
+                    if score > best_score {
+                        best_score = score;
+                        best_faucet = Some(metadata);
+                    }
+                }
+
+                let selected = best_faucet
+                    .ok_or_else(|| anyhow!("No funded faucets found"))?;
+
+                println!(
+                    "Best faucet selected: {} | difficulty {} | reward {} SOL",
+                    selected.faucet_pubkey,
+                    selected.difficulty,
+                    selected.amount as f64 / 1e9
+                );
+
+                let mut specs_for_difficulty = BTreeMap::new();
+                specs_for_difficulty.insert(selected.amount, selected);
+
+                let mut faucet_specs = BTreeMap::new();
+                faucet_specs.insert(selected.difficulty, specs_for_difficulty);
+                faucet_specs
+            } else if no_infer {
                 let mut faucet_specs = BTreeMap::new();
                 match (difficulty, reward) {
                     (Some(d), Some(r)) => {
