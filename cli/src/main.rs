@@ -14,6 +14,7 @@ use itertools::Itertools;
 use proof_of_work_faucet::Difficulty;
 use solana_account_decoder::UiAccountEncoding;
 use solana_cli_config::{Config, ConfigInput, CONFIG_FILE};
+use solana_client::client_error::ClientErrorKind;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcAccountInfoConfig;
 use solana_client::rpc_config::RpcProgramAccountsConfig;
@@ -102,11 +103,22 @@ enum SubCommand {
     },
 }
 
+const MIN_LEARNED_CLAIMS: u64 = 5;
+const FULL_CONFIDENCE_CLAIMS: u64 = 25;
+const MIN_LEARNED_RATIO: f64 = 0.25;
+const MAX_LEARNED_RATIO: f64 = 4.0;
+const MAX_RECENT_SAMPLES: usize = 50;
+const EXPLORATION_FULLY_KNOWN_CLAIMS: u64 = 25;
+const MAX_EXPLORATION_BONUS: f64 = 0.20;
+const MAX_CONSECUTIVE_FAUCET_FAILURES: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct DifficultyPerformance {
     claims: u64,
     total_seconds: f64,
     gross_lamports: u64,
+    #[serde(default)]
+    recent_seconds: Vec<f64>,
 }
 
 impl DifficultyPerformance {
@@ -116,6 +128,46 @@ impl DifficultyPerformance {
         } else {
             Some(self.total_seconds / self.claims as f64)
         }
+    }
+
+    fn robust_seconds(&self) -> Option<f64> {
+        const MIN_ROBUST_SAMPLES: usize = 5;
+
+        if self.recent_seconds.len() < MIN_ROBUST_SAMPLES {
+            return self.average_seconds();
+        }
+
+        let mut samples: Vec<f64> = self
+            .recent_seconds
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .collect();
+
+        if samples.len() < MIN_ROBUST_SAMPLES {
+            return self.average_seconds();
+        }
+
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        // Trim 20% from both tails.
+        let mut trim = samples.len() / 5;
+
+        // Always leave at least 3 observations.
+        while samples.len().saturating_sub(trim * 2) < 3 {
+            if trim == 0 {
+                break;
+            }
+            trim -= 1;
+        }
+
+        let kept = &samples[trim..samples.len() - trim];
+
+        if kept.is_empty() {
+            return self.average_seconds();
+        }
+
+        Some(kept.iter().sum::<f64>() / kept.len() as f64)
     }
 
     fn sol_per_second(&self) -> Option<f64> {
@@ -398,7 +450,14 @@ async fn main() -> anyhow::Result<()> {
             let starting_balance = payer_balance;
             let mut gross_rewards_lamports: u64 = 0;
             // difficulty -> (claims, total_seconds, gross_lamports)
-            let mut performance_stats: BTreeMap<u8, (u64, f64, u64)> = BTreeMap::new();
+            let mut performance_stats: BTreeMap<u8, (u64, f64, u64, Vec<f64>)> = BTreeMap::new();
+
+            // Consecutive transaction failures per faucet during this session.
+            let mut faucet_failures: BTreeMap<Pubkey, u32> = BTreeMap::new();
+
+            // Consecutive infrastructure/RPC failures.
+            // Never used to penalize a faucet.
+            let mut rpc_failure_streak: u32 = 0;
             let mut last_reward_at = std::time::Instant::now();
 
             'mining: while airdropped_amount < target_lamports
@@ -538,8 +597,26 @@ async fn main() -> anyhow::Result<()> {
                     };
 
                     let blockhash = match client.get_latest_blockhash().await {
-                        Ok(blockhash) => blockhash,
-                        Err(_) => continue,
+                        Ok(blockhash) => {
+                            rpc_failure_streak = 0;
+                            blockhash
+                        }
+                        Err(e) => {
+                            rpc_failure_streak = rpc_failure_streak.saturating_add(1);
+
+                            let shift = rpc_failure_streak.saturating_sub(1).min(3);
+                            let backoff_ms = 500_u64.saturating_mul(1_u64 << shift);
+
+                            eprintln!("RPC error while getting latest blockhash: {}", e);
+                            eprintln!(
+                                "RPC retry backoff: {} ms (failure {})",
+                                backoff_ms, rpc_failure_streak
+                            );
+
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+
+                            continue;
+                        }
                     };
                     let transaction = solana_sdk::transaction::Transaction::new_signed_with_payer(
                         &[ix],
@@ -557,13 +634,21 @@ async fn main() -> anyhow::Result<()> {
                             airdropped_amount += metadata.amount;
                             rewards_received += 1;
                             gross_rewards_lamports += metadata.amount;
+
+                            // Successful claim: reset this faucet's failure counter.
+                            faucet_failures.remove(&metadata.faucet_pubkey);
+                            rpc_failure_streak = 0;
                             let reward_elapsed = last_reward_at.elapsed().as_secs_f64();
-                            let stats = performance_stats
-                                .entry(metadata.difficulty)
-                                .or_insert((0, 0.0, 0));
+                            let stats = performance_stats.entry(metadata.difficulty).or_insert((
+                                0,
+                                0.0,
+                                0,
+                                Vec::new(),
+                            ));
                             stats.0 += 1;
                             stats.1 += reward_elapsed;
                             stats.2 += metadata.amount;
+                            stats.3.push(reward_elapsed);
                             last_reward_at = std::time::Instant::now();
                             if best
                                 && rescan_every.map_or(false, |interval| {
@@ -609,7 +694,84 @@ async fn main() -> anyhow::Result<()> {
                             matched_difficulties.push(metadata.difficulty);
                         }
                         Err(e) => {
-                            println!("Failed to recieve airdrop: {}", e);
+                            println!("Failed to receive airdrop: {}", e);
+
+                            // A concrete transaction failure can reasonably be
+                            // attributed to this claim/faucet. Transport and RPC
+                            // infrastructure errors must not penalize the faucet.
+                            let faucet_related = e.kind.get_transaction_error().is_some()
+                                || matches!(&e.kind, ClientErrorKind::FaucetError(_));
+
+                            if faucet_related {
+                                rpc_failure_streak = 0;
+
+                                let failures =
+                                    faucet_failures.entry(metadata.faucet_pubkey).or_insert(0);
+
+                                *failures += 1;
+
+                                println!(
+                                    "Faucet {} failure {}/{}",
+                                    metadata.faucet_pubkey,
+                                    *failures,
+                                    MAX_CONSECUTIVE_FAUCET_FAILURES
+                                );
+
+                                if *failures >= MAX_CONSECUTIVE_FAUCET_FAILURES {
+                                    println!(
+                                        "Faucet {} temporarily disabled for this candidate set",
+                                        metadata.faucet_pubkey
+                                    );
+
+                                    if let Some(specs) = faucet_specs.get_mut(&metadata.difficulty)
+                                    {
+                                        specs.remove(&metadata.amount);
+                                    }
+
+                                    if faucet_specs
+                                        .get(&metadata.difficulty)
+                                        .map_or(false, |specs| specs.is_empty())
+                                    {
+                                        faucet_specs.remove(&metadata.difficulty);
+
+                                        if metadata.difficulty == min_prefix_len {
+                                            if let Some(min) = faucet_specs.keys().min().copied() {
+                                                min_prefix_len = min;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                rpc_failure_streak = rpc_failure_streak.saturating_add(1);
+
+                                let shift = rpc_failure_streak.saturating_sub(1).min(3);
+
+                                let backoff_ms = 500_u64.saturating_mul(1_u64 << shift);
+
+                                let category = match &e.kind {
+                                    ClientErrorKind::Io(_) => "I/O",
+                                    ClientErrorKind::Reqwest(_) => "HTTP/transport",
+                                    ClientErrorKind::RpcError(_) => "RPC",
+                                    ClientErrorKind::SerdeJson(_) => "RPC parse",
+                                    ClientErrorKind::SigningError(_) => "signing",
+                                    ClientErrorKind::Custom(_) => "client/unknown",
+                                    ClientErrorKind::TransactionError(_) => "transaction",
+                                    ClientErrorKind::FaucetError(_) => "faucet",
+                                };
+
+                                eprintln!(
+                                    "Non-faucet error ({}) - faucet {} not penalized",
+                                    category, metadata.faucet_pubkey
+                                );
+                                eprintln!(
+                                    "RPC/client retry backoff: {} ms (failure {})",
+                                    backoff_ms, rpc_failure_streak
+                                );
+
+                                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms))
+                                    .await;
+                            }
+
                             continue;
                         }
                     }
@@ -647,7 +809,7 @@ async fn main() -> anyhow::Result<()> {
 
             println!();
             println!("=== Measured profitability ===");
-            for (difficulty, (claims, seconds, lamports)) in &performance_stats {
+            for (difficulty, (claims, seconds, lamports, _recent_seconds)) in &performance_stats {
                 if *claims == 0 || *seconds <= 0.0 {
                     continue;
                 }
@@ -669,7 +831,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             // Merge session measurements into persistent history
-            for (difficulty, (claims, seconds, lamports)) in &performance_stats {
+            for (difficulty, (claims, seconds, lamports, recent_seconds)) in &performance_stats {
                 let history = persistent_history
                     .difficulties
                     .entry(*difficulty)
@@ -678,6 +840,15 @@ async fn main() -> anyhow::Result<()> {
                 history.claims += *claims;
                 history.total_seconds += *seconds;
                 history.gross_lamports += *lamports;
+
+                history
+                    .recent_seconds
+                    .extend(recent_seconds.iter().copied());
+
+                if history.recent_seconds.len() > MAX_RECENT_SAMPLES {
+                    let excess = history.recent_seconds.len() - MAX_RECENT_SAMPLES;
+                    history.recent_seconds.drain(0..excess);
+                }
             }
 
             save_performance_history(&persistent_history)?;
@@ -707,7 +878,7 @@ async fn select_best_faucet(
     let mut calibrated_work = 0.0_f64;
 
     for (difficulty, perf) in &history.difficulties {
-        if perf.claims >= 5 && perf.total_seconds > 0.0 {
+        if perf.claims >= MIN_LEARNED_CLAIMS && perf.total_seconds > 0.0 {
             calibrated_seconds += perf.total_seconds;
             calibrated_work += perf.claims as f64 * 58_f64.powi(*difficulty as i32);
         }
@@ -731,10 +902,56 @@ async fn select_best_faucet(
 
         let reward_sol = metadata.amount as f64 / 1e9;
 
+        let theoretical_seconds = seconds_per_work_unit
+            .map(|seconds_per_unit| seconds_per_unit * 58_f64.powi(metadata.difficulty as i32));
+
         let predicted_seconds = match history.difficulties.get(&metadata.difficulty) {
-            Some(perf) if perf.claims >= 5 => perf.average_seconds(),
-            _ => seconds_per_work_unit
-                .map(|seconds_per_unit| seconds_per_unit * 58_f64.powi(metadata.difficulty as i32)),
+            Some(perf) if perf.claims >= MIN_LEARNED_CLAIMS && perf.total_seconds > 0.0 => {
+                let learned_seconds = perf.robust_seconds();
+
+                match (learned_seconds, theoretical_seconds) {
+                    (Some(learned), Some(theoretical)) if learned > 0.0 && theoretical > 0.0 => {
+                        // Confidence grows gradually from the minimum
+                        // sample threshold to FULL_CONFIDENCE_CLAIMS.
+                        let confidence = if perf.claims >= FULL_CONFIDENCE_CLAIMS {
+                            1.0
+                        } else {
+                            let learned_range =
+                                (FULL_CONFIDENCE_CLAIMS - MIN_LEARNED_CLAIMS) as f64;
+
+                            ((perf.claims - MIN_LEARNED_CLAIMS) as f64 / learned_range)
+                                .clamp(0.0, 1.0)
+                        };
+
+                        // Prevent a small number of anomalous sessions
+                        // from producing an extreme learned estimate.
+                        let min_seconds = theoretical * MIN_LEARNED_RATIO;
+                        let max_seconds = theoretical * MAX_LEARNED_RATIO;
+
+                        let protected_learned = learned.clamp(min_seconds, max_seconds);
+
+                        let blended =
+                            theoretical * (1.0 - confidence) + protected_learned * confidence;
+
+                        println!(
+                                "Learning: difficulty {} | claims {} | confidence {:.0}% | robust {:.3}s | blended {:.3}s",
+                                metadata.difficulty,
+                                perf.claims,
+                                confidence * 100.0,
+                                learned,
+                                blended
+                            );
+
+                        Some(blended)
+                    }
+
+                    (Some(learned), None) if learned > 0.0 => Some(learned),
+
+                    (_, theoretical) => theoretical,
+                }
+            }
+
+            _ => theoretical_seconds,
         };
 
         let score = match predicted_seconds {
@@ -757,8 +974,41 @@ async fn select_best_faucet(
             }
         };
 
-        if score > best_score {
-            best_score = score;
+        // Controlled exploration:
+        // poorly measured difficulties receive a small deterministic
+        // optimism bonus, capped at MAX_EXPLORATION_BONUS.
+        //
+        // This does NOT force exploration of clearly unprofitable
+        // difficulties; it only breaks close calls in favour of
+        // gathering more information.
+        let historical_claims = history
+            .difficulties
+            .get(&metadata.difficulty)
+            .map(|perf| perf.claims)
+            .unwrap_or(0);
+
+        let exploration_bonus = if historical_claims >= EXPLORATION_FULLY_KNOWN_CLAIMS {
+            0.0
+        } else {
+            MAX_EXPLORATION_BONUS
+                * (1.0 - historical_claims as f64 / EXPLORATION_FULLY_KNOWN_CLAIMS as f64)
+        };
+
+        let adjusted_score = score * (1.0 + exploration_bonus);
+
+        if exploration_bonus > 0.0 {
+            println!(
+                "Exploration: difficulty {} | claims {} | bonus +{:.1}% | base {:.9} | adjusted {:.9}",
+                metadata.difficulty,
+                historical_claims,
+                exploration_bonus * 100.0,
+                score,
+                adjusted_score
+            );
+        }
+
+        if adjusted_score > best_score {
+            best_score = adjusted_score;
             best_faucet = Some(metadata);
         }
     }
