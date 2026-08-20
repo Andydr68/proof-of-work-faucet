@@ -100,6 +100,9 @@ enum SubCommand {
         /// Do not search for faucets automatically
         #[clap(long, default_value = "false")]
         no_infer: bool,
+        /// Forward each successful mining reward to this Solana address
+        #[clap(long)]
+        recipient: Option<String>,
     },
 }
 
@@ -111,6 +114,7 @@ const MAX_RECENT_SAMPLES: usize = 50;
 const EXPLORATION_FULLY_KNOWN_CLAIMS: u64 = 25;
 const MAX_EXPLORATION_BONUS: f64 = 0.20;
 const MAX_CONSECUTIVE_FAUCET_FAILURES: u32 = 3;
+const FAUCET_COOLDOWN_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct DifficultyPerformance {
@@ -365,14 +369,34 @@ async fn main() -> anyhow::Result<()> {
             rescan_every,
             best,
             no_infer,
+            recipient,
         } => {
+            let recipient_pubkey = match recipient.as_deref() {
+                Some(value) => Some(value.parse::<Pubkey>().map_err(|e| {
+                    anyhow!("Invalid --recipient Solana address '{}': {}", value, e)
+                })?),
+                None => None,
+            };
+
+            if let Some(recipient) = recipient_pubkey.as_ref() {
+                println!("Mining rewards will be forwarded to: {}", recipient);
+            }
+
             let mut persistent_history = load_performance_history();
 
+            // Faucets temporarily excluded after repeated claim failures.
+            let mut faucet_cooldowns: BTreeMap<Pubkey, std::time::Instant> = BTreeMap::new();
+
             let mut faucet_specs = if best {
-                let selected =
-                    select_best_faucet(&client, &commitment, program_id, &persistent_history)
-                        .await?
-                        .ok_or_else(|| anyhow!("No funded faucets found"))?;
+                let selected = select_best_faucet(
+                    &client,
+                    &commitment,
+                    program_id,
+                    &persistent_history,
+                    &faucet_cooldowns,
+                )
+                .await?
+                .ok_or_else(|| anyhow!("No funded faucets found"))?;
 
                 println!(
                     "Best faucet selected: {} | difficulty {} | reward {} SOL",
@@ -539,6 +563,7 @@ async fn main() -> anyhow::Result<()> {
                                         &commitment,
                                         program_id,
                                         &persistent_history,
+                                        &faucet_cooldowns,
                                     )
                                     .await?
                                     {
@@ -631,12 +656,56 @@ async fn main() -> anyhow::Result<()> {
                                 "Received {} SOL from faucet {}: {}",
                                 reward, metadata.faucet_pubkey, txid
                             );
+
+                            if let Some(recipient) = recipient_pubkey.as_ref() {
+                                let transfer_ix = solana_sdk::system_instruction::transfer(
+                                    &payer.pubkey(),
+                                    recipient,
+                                    metadata.amount,
+                                );
+
+                                match client.get_latest_blockhash().await {
+                                    Ok(forward_blockhash) => {
+                                        let forward_tx =
+                                            solana_sdk::transaction::Transaction::new_signed_with_payer(
+                                                &[transfer_ix],
+                                                Some(&payer.pubkey()),
+                                                &[&payer],
+                                                forward_blockhash,
+                                            );
+
+                                        match client.send_and_confirm_transaction(&forward_tx).await
+                                        {
+                                            Ok(forward_txid) => {
+                                                println!(
+                                                    "Forwarded {} SOL to {}: {}",
+                                                    reward, recipient, forward_txid
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Reward received, but forwarding to {} failed: {}",
+                                                    recipient, e
+                                                );
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Reward received, but could not get blockhash for forwarding to {}: {}",
+                                            recipient, e
+                                        );
+                                    }
+                                }
+                            }
+
                             airdropped_amount += metadata.amount;
                             rewards_received += 1;
                             gross_rewards_lamports += metadata.amount;
 
                             // Successful claim: reset this faucet's failure counter.
                             faucet_failures.remove(&metadata.faucet_pubkey);
+                            faucet_cooldowns.remove(&metadata.faucet_pubkey);
                             rpc_failure_streak = 0;
                             let reward_elapsed = last_reward_at.elapsed().as_secs_f64();
                             let stats = performance_stats.entry(metadata.difficulty).or_insert((
@@ -665,6 +734,7 @@ async fn main() -> anyhow::Result<()> {
                                     &commitment,
                                     program_id,
                                     &persistent_history,
+                                    &faucet_cooldowns,
                                 )
                                 .await?
                                 {
@@ -718,9 +788,14 @@ async fn main() -> anyhow::Result<()> {
                                 );
 
                                 if *failures >= MAX_CONSECUTIVE_FAUCET_FAILURES {
+                                    let cooldown_until = std::time::Instant::now()
+                                        + std::time::Duration::from_secs(FAUCET_COOLDOWN_SECS);
+
+                                    faucet_cooldowns.insert(metadata.faucet_pubkey, cooldown_until);
+
                                     println!(
-                                        "Faucet {} temporarily disabled for this candidate set",
-                                        metadata.faucet_pubkey
+                                        "Faucet {} disabled for {} seconds",
+                                        metadata.faucet_pubkey, FAUCET_COOLDOWN_SECS
                                     );
 
                                     if let Some(specs) = faucet_specs.get_mut(&metadata.difficulty)
@@ -867,6 +942,8 @@ async fn select_best_faucet(
     commitment: &CommitmentConfig,
     program_id: Pubkey,
     history: &PerformanceHistory,
+
+    faucet_cooldowns: &BTreeMap<Pubkey, std::time::Instant>,
 ) -> anyhow::Result<Option<FaucetMetadata>> {
     let all_faucets = get_all_faucets(client, commitment, program_id).await?;
 
@@ -891,6 +968,22 @@ async fn select_best_faucet(
     };
 
     for metadata in all_faucets {
+        if let Some(cooldown_until) = faucet_cooldowns.get(&metadata.faucet_pubkey) {
+            let now = std::time::Instant::now();
+
+            if *cooldown_until > now {
+                let remaining = cooldown_until.saturating_duration_since(now);
+
+                println!(
+                    "Cooldown: faucet {} skipped for {:.1}s",
+                    metadata.faucet_pubkey,
+                    remaining.as_secs_f64()
+                );
+
+                continue;
+            }
+        }
+
         let balance = client
             .get_balance_with_commitment(&metadata.faucet_pubkey, *commitment)
             .await?
