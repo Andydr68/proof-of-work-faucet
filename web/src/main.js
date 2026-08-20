@@ -175,6 +175,42 @@ app.innerHTML = `
         </div>
       </div>
 
+      <div class="card performance-card">
+        <h2>Performance</h2>
+
+        <div class="stats-grid">
+          <div>
+            <span>Historical claims</span>
+            <strong id="perf-claims">--</strong>
+          </div>
+
+          <div>
+            <span>Historical average</span>
+            <strong id="perf-average">--</strong>
+          </div>
+
+          <div>
+            <span>Recent robust time</span>
+            <strong id="perf-robust">--</strong>
+          </div>
+
+          <div>
+            <span>Recent samples</span>
+            <strong id="perf-samples">--</strong>
+          </div>
+
+          <div>
+            <span>Gross SOL/hour</span>
+            <strong id="perf-sol-hour">--</strong>
+          </div>
+
+          <div>
+            <span>Last overhead</span>
+            <strong id="perf-overhead">--</strong>
+          </div>
+        </div>
+      </div>
+
       <div
         id="mining-result"
         class="card"
@@ -254,6 +290,14 @@ const sessionTime = document.querySelector('#session-time')
 const sessionAverage = document.querySelector('#session-average')
 const sessionRetries = document.querySelector('#session-retries')
 const sessionErrors = document.querySelector('#session-errors')
+
+const perfClaims = document.querySelector('#perf-claims')
+const perfAverage = document.querySelector('#perf-average')
+const perfRobust = document.querySelector('#perf-robust')
+const perfSamples = document.querySelector('#perf-samples')
+const perfSolHour = document.querySelector('#perf-sol-hour')
+const perfOverhead = document.querySelector('#perf-overhead')
+
 const sendButton = document.querySelector('#send')
 const status = document.querySelector('#status')
 const txStatus = document.querySelector('#tx-status')
@@ -311,6 +355,52 @@ async function refreshBackendStatus() {
     backendStatus.textContent = 'Backend: offline'
     backendStatus.className =
       'status-badge status-offline'
+  }
+}
+
+async function refreshPerformance() {
+  try {
+    const response = await fetch(
+      'http://localhost:3001/api/performance',
+      {
+        cache: 'no-store',
+      },
+    )
+
+    if (!response.ok) return
+
+    const result = await response.json()
+
+    const difficulty =
+      result.difficulties?.['3']
+
+    if (!difficulty) return
+
+    perfClaims.textContent =
+      String(difficulty.claims)
+
+    perfAverage.textContent =
+      difficulty.averageSeconds != null
+        ? `${difficulty.averageSeconds.toFixed(3)} s`
+        : '--'
+
+    perfRobust.textContent =
+      difficulty.medianRecent != null
+        ? `${difficulty.medianRecent.toFixed(3)} s`
+        : '--'
+
+    perfSamples.textContent =
+      String(difficulty.recentSamples)
+
+    perfSolHour.textContent =
+      difficulty.grossSolPerHour != null
+        ? `${difficulty.grossSolPerHour.toFixed(6)} SOL/h`
+        : '--'
+  } catch (error) {
+    console.warn(
+      'Performance endpoint unavailable:',
+      error,
+    )
   }
 }
 
@@ -410,7 +500,13 @@ async function mineOneReward() {
 
   miningResult.style.display = 'block'
 
+  perfOverhead.textContent =
+    mining.overhead != null
+      ? `${mining.overhead.toFixed(9)} SOL`
+      : '--'
+
   await refreshBalance()
+  await refreshPerformance()
 
   return mining
 }
@@ -712,7 +808,10 @@ async function connectMetaMask() {
 }
 
 refreshBackendStatus()
+refreshPerformance()
+
 setInterval(refreshBackendStatus, 2000)
+setInterval(refreshPerformance, 10000)
 
 button.addEventListener('click', connectMetaMask)
 refreshButton.addEventListener('click', refreshBalance)
