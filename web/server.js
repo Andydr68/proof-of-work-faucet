@@ -6,7 +6,18 @@ import { PublicKey } from '@solana/web3.js'
 const app = express()
 const PORT = 3001
 
-app.use(cors({ origin: 'http://localhost:5175' }))
+app.use(cors({
+  origin(origin, callback) {
+    if (
+      !origin ||
+      /^http:\/\/localhost:\d+$/.test(origin)
+    ) {
+      callback(null, true)
+    } else {
+      callback(new Error('Origin not allowed by CORS'))
+    }
+  },
+}))
 app.use(express.json())
 
 let mining = false

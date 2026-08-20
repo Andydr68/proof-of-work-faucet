@@ -14,39 +14,99 @@ import {
 const app = document.querySelector('#app')
 
 app.innerHTML = `
-  <div class="container">
-    <h1>Proof of Work Faucet</h1>
+  <div class="app-shell">
+    <header class="app-header">
+      <div>
+        <h1>Proof of Work Faucet</h1>
+        <p class="subtitle">
+          Solana Devnet mining dashboard
+        </p>
+      </div>
 
-    <p>Network: <strong>Solana Devnet</strong></p>
+      <div class="header-status">
+        <span class="network-pill">
+          Solana Devnet
+        </span>
 
-    <div id="backend-status" class="status-badge status-offline">
-      Backend: checking...
-    </div>
+        <div
+          id="backend-status"
+          class="status-badge status-offline"
+        >
+          Backend: checking...
+        </div>
+      </div>
+    </header>
 
-    <button id="connect">Connect MetaMask</button>
+    <section class="card wallet-card">
+      <div class="card-title-row">
+        <div>
+          <h2>Wallet</h2>
+          <p>MetaMask Solana account</p>
+        </div>
 
-    <div id="status">Wallet non connesso</div>
+        <button id="connect">
+          Connect MetaMask
+        </button>
+      </div>
 
-    <div id="wallet-info" style="display:none;">
-      <p><strong>Solana address:</strong></p>
-      <code id="address"></code>
+      <div id="status">
+        Wallet non connesso
+      </div>
 
-      <p><strong>Devnet balance:</strong></p>
-      <div id="balance">-- SOL</div>
+      <div id="wallet-info" style="display:none;">
+        <div class="wallet-grid">
+          <div>
+            <span class="field-label">
+              Solana address
+            </span>
 
-      <button id="refresh">Refresh Balance</button>
+            <code id="address"></code>
+          </div>
+
+          <div class="balance-block">
+            <span class="field-label">
+              Devnet balance
+            </span>
+
+            <strong id="balance">
+              -- SOL
+            </strong>
+
+            <button id="refresh">
+              Refresh Balance
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card mining-card">
+      <div class="card-title-row">
+        <div>
+          <h2>Mining</h2>
+          <p>Control the current mining session</p>
+        </div>
+
+        <div id="mine-status" class="mine-state">
+          Idle
+        </div>
+      </div>
 
       <div class="mining-controls">
-        <label for="reward-target">Rewards target:</label>
+        <div class="control-group">
+          <label for="reward-target">
+            Rewards target
+          </label>
 
-        <input
-          id="reward-target"
-          type="number"
-          min="1"
-          max="100"
-          step="1"
-          value="1"
-        >
+          <input
+            id="reward-target"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            value="1"
+          >
+        </div>
 
         <label class="continuous-option">
           <input
@@ -56,26 +116,73 @@ app.innerHTML = `
           Continuous mining
         </label>
 
-        <button id="mine">Start Mining</button>
-        <button id="stop-mine" disabled>Stop Mining</button>
+        <div class="button-row">
+          <button id="mine">
+            Start Mining
+          </button>
+
+          <button id="stop-mine" disabled>
+            Stop Mining
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <div class="card">
+        <h2>Session</h2>
+
+        <div id="session-stats" class="stats-grid">
+          <div>
+            <span>Completed</span>
+            <strong id="session-completed">0</strong>
+          </div>
+
+          <div>
+            <span>Total rewards</span>
+            <strong id="session-rewards">
+              0.000000000 SOL
+            </strong>
+          </div>
+
+          <div>
+            <span>Elapsed</span>
+            <strong id="session-time">
+              0.000 s
+            </strong>
+          </div>
+
+          <div>
+            <span>Average</span>
+            <strong id="session-average">
+              --
+            </strong>
+          </div>
+
+          <div>
+            <span>Retries</span>
+            <strong id="session-retries">
+              0
+            </strong>
+          </div>
+
+          <div>
+            <span>Errors</span>
+            <strong id="session-errors">
+              0
+            </strong>
+          </div>
+        </div>
       </div>
 
-      <div id="mine-status">Idle</div>
+      <div
+        id="mining-result"
+        class="card"
+        style="display:none;"
+      >
+        <h2>Last mining result</h2>
 
-      <div id="session-stats">
-        <p><strong>Session:</strong></p>
-        <div>Completed: <span id="session-completed">0</span></div>
-        <div>Total rewards: <span id="session-rewards">0.000000000 SOL</span></div>
-        <div>Elapsed: <span id="session-time">0.000 s</span></div>
-        <div>Average: <span id="session-average">--</span></div>
-        <div>Retries: <span id="session-retries">0</span></div>
-        <div>Errors: <span id="session-errors">0</span></div>
-      </div>
-
-      <div id="mining-result" style="display:none;">
-        <p><strong>Last mining result:</strong></p>
-
-        <div class="mining-grid">
+        <div class="result-grid">
           <span>Faucet</span>
           <code id="mine-faucet">--</code>
 
@@ -95,19 +202,28 @@ app.innerHTML = `
           <code id="mine-forward-tx">--</code>
         </div>
       </div>
+    </section>
 
-      <hr>
-
+    <section class="card send-card">
       <h2>Send Devnet SOL</h2>
+      <p>
+        Send SOL from the connected MetaMask account.
+      </p>
 
-      <label for="recipient">Recipient:</label>
+      <label for="recipient">
+        Recipient
+      </label>
+
       <input
         id="recipient"
         type="text"
         placeholder="Solana recipient address"
       >
 
-      <label for="amount">Amount:</label>
+      <label for="amount">
+        Amount
+      </label>
+
       <input
         id="amount"
         type="number"
@@ -116,10 +232,12 @@ app.innerHTML = `
         value="0.005"
       >
 
-      <button id="send">Send SOL</button>
+      <button id="send">
+        Send SOL
+      </button>
 
       <div id="tx-status"></div>
-    </div>
+    </section>
   </div>
 `
 
