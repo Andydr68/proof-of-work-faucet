@@ -32,9 +32,31 @@ app.innerHTML = `
 
       <button id="refresh">Refresh Balance</button>
 
-      <button id="mine">Mine 1 Reward</button>
+      <div class="mining-controls">
+        <label for="reward-target">Rewards target:</label>
 
-      <div id="mine-status"></div>
+        <input
+          id="reward-target"
+          type="number"
+          min="1"
+          max="100"
+          step="1"
+          value="1"
+        >
+
+        <button id="mine">Start Mining</button>
+        <button id="stop-mine" disabled>Stop Mining</button>
+      </div>
+
+      <div id="mine-status">Idle</div>
+
+      <div id="session-stats">
+        <p><strong>Session:</strong></p>
+        <div>Completed: <span id="session-completed">0</span></div>
+        <div>Total rewards: <span id="session-rewards">0.000000000 SOL</span></div>
+        <div>Elapsed: <span id="session-time">0.000 s</span></div>
+        <div>Average: <span id="session-average">--</span></div>
+      </div>
 
       <div id="mining-result" style="display:none;">
         <p><strong>Last mining result:</strong></p>
@@ -90,6 +112,12 @@ app.innerHTML = `
 const button = document.querySelector('#connect')
 const refreshButton = document.querySelector('#refresh')
 const mineButton = document.querySelector('#mine')
+const stopMineButton = document.querySelector('#stop-mine')
+const rewardTargetElement = document.querySelector('#reward-target')
+const sessionCompleted = document.querySelector('#session-completed')
+const sessionRewards = document.querySelector('#session-rewards')
+const sessionTime = document.querySelector('#session-time')
+const sessionAverage = document.querySelector('#session-average')
 const sendButton = document.querySelector('#send')
 const status = document.querySelector('#status')
 const txStatus = document.querySelector('#tx-status')
@@ -111,6 +139,9 @@ let solanaClient
 let wallet
 let currentAccount
 let currentAddress
+
+let miningSessionActive = false
+let stopMiningRequested = false
 
 const infuraApiKey = import.meta.env.VITE_INFURA_API_KEY
 const devnetRpc = 'https://api.devnet.solana.com'
@@ -136,83 +167,176 @@ async function refreshBalance() {
 
 async function mineOneReward() {
   if (!currentAddress) {
-    mineStatus.textContent = 'Connetti prima MetaMask'
+    throw new Error('Connetti prima MetaMask')
+  }
+
+  const response = await fetch(
+    'http://localhost:3001/api/mine',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        recipient: currentAddress,
+      }),
+    },
+  )
+
+  const result = await response.json()
+
+  if (!response.ok || !result.ok) {
+    throw new Error(
+      result.error ||
+      result.stderr ||
+      'Mining failed'
+    )
+  }
+
+  const mining = result.mining || {}
+
+  mineFaucet.textContent =
+    mining.faucet || '--'
+
+  mineDifficulty.textContent =
+    mining.difficulty ?? '--'
+
+  mineReward.textContent =
+    mining.reward != null
+      ? `${mining.reward} SOL`
+      : '--'
+
+  mineTime.textContent =
+    mining.elapsedSeconds != null
+      ? `${mining.elapsedSeconds.toFixed(3)} s`
+      : '--'
+
+  mineClaimTx.textContent =
+    mining.claimTx || '--'
+
+  mineForwardTx.textContent =
+    mining.forwardTx || '--'
+
+  miningResult.style.display = 'block'
+
+  await refreshBalance()
+
+  return mining
+}
+
+async function startMiningSession() {
+  if (miningSessionActive) return
+
+  if (!currentAddress) {
+    mineStatus.textContent =
+      'Connetti prima MetaMask'
     return
   }
 
-  try {
-    mineButton.disabled = true
-    mineStatus.textContent =
-      'Mining in corso... attendi la reward'
-
-    const response = await fetch(
-      'http://localhost:3001/api/mine',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recipient: currentAddress,
-        }),
-      },
+  const target =
+    Number.parseInt(
+      rewardTargetElement.value,
+      10,
     )
 
-    const result = await response.json()
+  if (
+    !Number.isInteger(target) ||
+    target < 1 ||
+    target > 100
+  ) {
+    mineStatus.textContent =
+      'Rewards target non valido'
+    return
+  }
 
-    if (!response.ok || !result.ok) {
-      throw new Error(
-        result.error ||
-        result.stderr ||
-        'Mining failed'
-      )
+  miningSessionActive = true
+  stopMiningRequested = false
+
+  mineButton.disabled = true
+  stopMineButton.disabled = false
+  rewardTargetElement.disabled = true
+
+  let completed = 0
+  let totalReward = 0
+  const startedAt = performance.now()
+
+  sessionCompleted.textContent = '0'
+  sessionRewards.textContent =
+    '0.000000000 SOL'
+  sessionTime.textContent = '0.000 s'
+  sessionAverage.textContent = '--'
+
+  try {
+    for (
+      let i = 0;
+      i < target;
+      i += 1
+    ) {
+      if (stopMiningRequested) break
+
+      mineStatus.textContent =
+        `Mining reward ${i + 1} di ${target}...`
+
+      const mining =
+        await mineOneReward()
+
+      completed += 1
+
+      if (typeof mining.reward === 'number') {
+        totalReward += mining.reward
+      }
+
+      const elapsed =
+        (performance.now() - startedAt) /
+        1000
+
+      sessionCompleted.textContent =
+        String(completed)
+
+      sessionRewards.textContent =
+        `${totalReward.toFixed(9)} SOL`
+
+      sessionTime.textContent =
+        `${elapsed.toFixed(3)} s`
+
+      sessionAverage.textContent =
+        `${(elapsed / completed).toFixed(3)} s`
+
+      if (stopMiningRequested) break
     }
 
-    mineStatus.textContent =
-      'Reward completata e inoltrata a MetaMask'
-
-    const mining = result.mining || {}
-
-    mineFaucet.textContent =
-      mining.faucet || '--'
-
-    mineDifficulty.textContent =
-      mining.difficulty ?? '--'
-
-    mineReward.textContent =
-      mining.reward != null
-        ? `${mining.reward} SOL`
-        : '--'
-
-    mineTime.textContent =
-      mining.elapsedSeconds != null
-        ? `${mining.elapsedSeconds.toFixed(3)} s`
-        : '--'
-
-    mineClaimTx.textContent =
-      mining.claimTx || '--'
-
-    mineForwardTx.textContent =
-      mining.forwardTx || '--'
-
-    miningResult.style.display =
-      'block'
-
-    console.log(
-      'Mining stdout:',
-      result.stdout
-    )
-
-    await refreshBalance()
+    if (stopMiningRequested) {
+      mineStatus.textContent =
+        `Stopped — ${completed} reward completate`
+    } else {
+      mineStatus.textContent =
+        `Completed — ${completed} reward completate`
+    }
 
   } catch (error) {
     console.error(error)
 
     mineStatus.textContent =
       `Errore mining: ${error.message ?? error}`
+
   } finally {
+    miningSessionActive = false
+
     mineButton.disabled = false
+    stopMineButton.disabled = true
+    rewardTargetElement.disabled = false
   }
+}
+
+function stopMiningSession() {
+  if (!miningSessionActive) return
+
+  stopMiningRequested = true
+
+  mineStatus.textContent =
+    'Stop richiesto: termino la reward in corso...'
+
+  stopMineButton.disabled = true
 }
 
 async function sendSol() {
@@ -335,5 +459,6 @@ async function connectMetaMask() {
 
 button.addEventListener('click', connectMetaMask)
 refreshButton.addEventListener('click', refreshBalance)
-mineButton.addEventListener('click', mineOneReward)
+mineButton.addEventListener('click', startMiningSession)
+stopMineButton.addEventListener('click', stopMiningSession)
 sendButton.addEventListener('click', sendSol)

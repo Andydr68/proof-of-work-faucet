@@ -104,3 +104,28 @@ input {
   padding: 8px;
   font-size: 12px;
 }
+
+.mining-controls {
+  margin-top: 18px;
+}
+
+.mining-controls label {
+  margin-top: 0;
+}
+
+#reward-target {
+  width: 110px;
+  margin-right: 8px;
+}
+
+#stop-mine {
+  margin-left: 8px;
+}
+
+#session-stats {
+  margin-top: 18px;
+  padding: 14px;
+  background: #151515;
+  border-radius: 8px;
+  line-height: 1.7;
+}
