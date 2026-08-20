@@ -88,3 +88,19 @@ input {
   margin-top: 15px;
   overflow-wrap: anywhere;
 }
+
+#mining-result {
+  margin-top: 20px;
+}
+
+.mining-grid {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px 15px;
+  align-items: center;
+}
+
+.mining-grid code {
+  padding: 8px;
+  font-size: 12px;
+}

@@ -36,6 +36,30 @@ app.innerHTML = `
 
       <div id="mine-status"></div>
 
+      <div id="mining-result" style="display:none;">
+        <p><strong>Last mining result:</strong></p>
+
+        <div class="mining-grid">
+          <span>Faucet</span>
+          <code id="mine-faucet">--</code>
+
+          <span>Difficulty</span>
+          <strong id="mine-difficulty">--</strong>
+
+          <span>Reward</span>
+          <strong id="mine-reward">--</strong>
+
+          <span>Mining time</span>
+          <strong id="mine-time">--</strong>
+
+          <span>Claim TX</span>
+          <code id="mine-claim-tx">--</code>
+
+          <span>Forward TX</span>
+          <code id="mine-forward-tx">--</code>
+        </div>
+      </div>
+
       <hr>
 
       <h2>Send Devnet SOL</h2>
@@ -70,6 +94,13 @@ const sendButton = document.querySelector('#send')
 const status = document.querySelector('#status')
 const txStatus = document.querySelector('#tx-status')
 const mineStatus = document.querySelector('#mine-status')
+const miningResult = document.querySelector('#mining-result')
+const mineFaucet = document.querySelector('#mine-faucet')
+const mineDifficulty = document.querySelector('#mine-difficulty')
+const mineReward = document.querySelector('#mine-reward')
+const mineTime = document.querySelector('#mine-time')
+const mineClaimTx = document.querySelector('#mine-claim-tx')
+const mineForwardTx = document.querySelector('#mine-forward-tx')
 const walletInfo = document.querySelector('#wallet-info')
 const addressElement = document.querySelector('#address')
 const balanceElement = document.querySelector('#balance')
@@ -140,7 +171,37 @@ async function mineOneReward() {
     mineStatus.textContent =
       'Reward completata e inoltrata a MetaMask'
 
-    console.log('Mining stdout:', result.stdout)
+    const mining = result.mining || {}
+
+    mineFaucet.textContent =
+      mining.faucet || '--'
+
+    mineDifficulty.textContent =
+      mining.difficulty ?? '--'
+
+    mineReward.textContent =
+      mining.reward != null
+        ? `${mining.reward} SOL`
+        : '--'
+
+    mineTime.textContent =
+      mining.elapsedSeconds != null
+        ? `${mining.elapsedSeconds.toFixed(3)} s`
+        : '--'
+
+    mineClaimTx.textContent =
+      mining.claimTx || '--'
+
+    mineForwardTx.textContent =
+      mining.forwardTx || '--'
+
+    miningResult.style.display =
+      'block'
+
+    console.log(
+      'Mining stdout:',
+      result.stdout
+    )
 
     await refreshBalance()
 
