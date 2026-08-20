@@ -142,3 +142,24 @@ input {
   width: auto;
   margin: 0;
 }
+
+.status-badge {
+  display: inline-block;
+  margin: 8px 0 18px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.status-online {
+  background: #183c24;
+}
+
+.status-mining {
+  background: #4a3a10;
+}
+
+.status-offline {
+  background: #4a1818;
+}

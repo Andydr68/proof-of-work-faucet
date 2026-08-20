@@ -19,6 +19,10 @@ app.innerHTML = `
 
     <p>Network: <strong>Solana Devnet</strong></p>
 
+    <div id="backend-status" class="status-badge status-offline">
+      Backend: checking...
+    </div>
+
     <button id="connect">Connect MetaMask</button>
 
     <div id="status">Wallet non connesso</div>
@@ -120,6 +124,7 @@ app.innerHTML = `
 `
 
 const button = document.querySelector('#connect')
+const backendStatus = document.querySelector('#backend-status')
 const refreshButton = document.querySelector('#refresh')
 const mineButton = document.querySelector('#mine')
 const stopMineButton = document.querySelector('#stop-mine')
@@ -159,6 +164,37 @@ let stopMiningRequested = false
 const infuraApiKey = import.meta.env.VITE_INFURA_API_KEY
 const devnetRpc = 'https://api.devnet.solana.com'
 const connection = new Connection(devnetRpc, 'confirmed')
+
+async function refreshBackendStatus() {
+  try {
+    const response = await fetch(
+      'http://localhost:3001/api/health',
+      {
+        cache: 'no-store',
+      },
+    )
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const health = await response.json()
+
+    if (health.mining) {
+      backendStatus.textContent = 'Backend: mining'
+      backendStatus.className =
+        'status-badge status-mining'
+    } else {
+      backendStatus.textContent = 'Backend: online'
+      backendStatus.className =
+        'status-badge status-online'
+    }
+  } catch {
+    backendStatus.textContent = 'Backend: offline'
+    backendStatus.className =
+      'status-badge status-offline'
+  }
+}
 
 async function refreshBalance() {
   if (!currentAddress) return
@@ -556,6 +592,9 @@ async function connectMetaMask() {
     button.disabled = false
   }
 }
+
+refreshBackendStatus()
+setInterval(refreshBackendStatus, 2000)
 
 button.addEventListener('click', connectMetaMask)
 refreshButton.addEventListener('click', refreshBalance)
