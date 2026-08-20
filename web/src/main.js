@@ -64,6 +64,8 @@ app.innerHTML = `
         <div>Total rewards: <span id="session-rewards">0.000000000 SOL</span></div>
         <div>Elapsed: <span id="session-time">0.000 s</span></div>
         <div>Average: <span id="session-average">--</span></div>
+        <div>Retries: <span id="session-retries">0</span></div>
+        <div>Errors: <span id="session-errors">0</span></div>
       </div>
 
       <div id="mining-result" style="display:none;">
@@ -127,6 +129,8 @@ const sessionCompleted = document.querySelector('#session-completed')
 const sessionRewards = document.querySelector('#session-rewards')
 const sessionTime = document.querySelector('#session-time')
 const sessionAverage = document.querySelector('#session-average')
+const sessionRetries = document.querySelector('#session-retries')
+const sessionErrors = document.querySelector('#session-errors')
 const sendButton = document.querySelector('#send')
 const status = document.querySelector('#status')
 const txStatus = document.querySelector('#tx-status')
@@ -179,27 +183,51 @@ async function mineOneReward() {
     throw new Error('Connetti prima MetaMask')
   }
 
-  const response = await fetch(
-    'http://localhost:3001/api/mine',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recipient: currentAddress,
-      }),
-    },
-  )
+  let response
 
-  const result = await response.json()
+  try {
+    response = await fetch(
+      'http://localhost:3001/api/mine',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipient: currentAddress,
+        }),
+      },
+    )
+  } catch (error) {
+    const wrapped =
+      new Error(`Backend non raggiungibile: ${error.message}`)
+    wrapped.retryable = true
+    throw wrapped
+  }
+
+  let result
+
+  try {
+    result = await response.json()
+  } catch {
+    const error =
+      new Error(`Risposta backend non valida: HTTP ${response.status}`)
+    error.retryable = response.status >= 500
+    throw error
+  }
 
   if (!response.ok || !result.ok) {
-    throw new Error(
+    const error = new Error(
       result.error ||
       result.stderr ||
-      'Mining failed'
+      `Mining failed: HTTP ${response.status}`
     )
+
+    error.retryable =
+      response.status >= 500 ||
+      response.status === 409
+
+    throw error
   }
 
   const mining = result.mining || {}
@@ -232,6 +260,7 @@ async function mineOneReward() {
 
   return mining
 }
+
 
 async function startMiningSession() {
   if (miningSessionActive) return
@@ -274,6 +303,9 @@ async function startMiningSession() {
 
   let completed = 0
   let totalReward = 0
+  let retries = 0
+  let errors = 0
+
   const startedAt = performance.now()
 
   sessionCompleted.textContent = '0'
@@ -281,6 +313,8 @@ async function startMiningSession() {
     '0.000000000 SOL'
   sessionTime.textContent = '0.000 s'
   sessionAverage.textContent = '--'
+  sessionRetries.textContent = '0'
+  sessionErrors.textContent = '0'
 
   try {
     for (
@@ -295,8 +329,46 @@ async function startMiningSession() {
           ? `Continuous mining — reward ${i + 1}...`
           : `Mining reward ${i + 1} di ${target}...`
 
-      const mining =
-        await mineOneReward()
+      let mining
+      let attempt = 0
+
+      while (true) {
+        try {
+          mining = await mineOneReward()
+          break
+        } catch (error) {
+          errors += 1
+          sessionErrors.textContent =
+            String(errors)
+
+          if (
+            !error.retryable ||
+            attempt >= 2 ||
+            stopMiningRequested
+          ) {
+            throw error
+          }
+
+          attempt += 1
+          retries += 1
+
+          sessionRetries.textContent =
+            String(retries)
+
+          const delaySeconds =
+            attempt * 2
+
+          mineStatus.textContent =
+            `Errore temporaneo. Retry ${attempt}/3 tra ${delaySeconds}s...`
+
+          await new Promise(resolve =>
+            setTimeout(
+              resolve,
+              delaySeconds * 1000,
+            )
+          )
+        }
+      }
 
       completed += 1
 

@@ -61,6 +61,13 @@ function parseMiningOutput(stdout) {
   }
 }
 
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    mining,
+  })
+})
+
 app.post('/api/mine', (req, res) => {
   if (mining) {
     return res.status(409).json({
