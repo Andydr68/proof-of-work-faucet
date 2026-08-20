@@ -44,6 +44,14 @@ app.innerHTML = `
           value="1"
         >
 
+        <label class="continuous-option">
+          <input
+            id="continuous-mining"
+            type="checkbox"
+          >
+          Continuous mining
+        </label>
+
         <button id="mine">Start Mining</button>
         <button id="stop-mine" disabled>Stop Mining</button>
       </div>
@@ -114,6 +122,7 @@ const refreshButton = document.querySelector('#refresh')
 const mineButton = document.querySelector('#mine')
 const stopMineButton = document.querySelector('#stop-mine')
 const rewardTargetElement = document.querySelector('#reward-target')
+const continuousMiningElement = document.querySelector('#continuous-mining')
 const sessionCompleted = document.querySelector('#session-completed')
 const sessionRewards = document.querySelector('#session-rewards')
 const sessionTime = document.querySelector('#session-time')
@@ -233,6 +242,9 @@ async function startMiningSession() {
     return
   }
 
+  const continuous =
+    continuousMiningElement.checked
+
   const target =
     Number.parseInt(
       rewardTargetElement.value,
@@ -240,9 +252,12 @@ async function startMiningSession() {
     )
 
   if (
-    !Number.isInteger(target) ||
-    target < 1 ||
-    target > 100
+    !continuous &&
+    (
+      !Number.isInteger(target) ||
+      target < 1 ||
+      target > 100
+    )
   ) {
     mineStatus.textContent =
       'Rewards target non valido'
@@ -255,6 +270,7 @@ async function startMiningSession() {
   mineButton.disabled = true
   stopMineButton.disabled = false
   rewardTargetElement.disabled = true
+  continuousMiningElement.disabled = true
 
   let completed = 0
   let totalReward = 0
@@ -269,13 +285,15 @@ async function startMiningSession() {
   try {
     for (
       let i = 0;
-      i < target;
+      continuous || i < target;
       i += 1
     ) {
       if (stopMiningRequested) break
 
       mineStatus.textContent =
-        `Mining reward ${i + 1} di ${target}...`
+        continuous
+          ? `Continuous mining — reward ${i + 1}...`
+          : `Mining reward ${i + 1} di ${target}...`
 
       const mining =
         await mineOneReward()
@@ -324,9 +342,19 @@ async function startMiningSession() {
 
     mineButton.disabled = false
     stopMineButton.disabled = true
-    rewardTargetElement.disabled = false
+    rewardTargetElement.disabled =
+      continuousMiningElement.checked
+    continuousMiningElement.disabled = false
   }
 }
+
+continuousMiningElement.addEventListener(
+  'change',
+  () => {
+    rewardTargetElement.disabled =
+      continuousMiningElement.checked
+  },
+)
 
 function stopMiningSession() {
   if (!miningSessionActive) return

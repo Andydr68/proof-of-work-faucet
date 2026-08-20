@@ -129,3 +129,16 @@ input {
   border-radius: 8px;
   line-height: 1.7;
 }
+
+.continuous-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 12px 12px 0;
+  font-weight: bold;
+}
+
+.continuous-option input {
+  width: auto;
+  margin: 0;
+}
