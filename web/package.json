@@ -1,0 +1,18 @@
+{
+  "name": "web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^8.2.0"
+  },
+  "dependencies": {
+    "@metamask/connect-solana": "^2.1.1",
+    "@solana/web3.js": "^1.98.4"
+  }
+}

@@ -1,0 +1,81 @@
+:root {
+  font-family: Arial, Helvetica, sans-serif;
+  background: #111;
+  color: #fff;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.container {
+  width: min(600px, 90%);
+  padding: 40px;
+  background: #1c1c1c;
+  border-radius: 16px;
+}
+
+h1 {
+  margin-top: 0;
+}
+
+button {
+  padding: 14px 22px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 0;
+  border-radius: 8px;
+}
+
+button:disabled {
+  opacity: 0.6;
+}
+
+#status {
+  margin-top: 20px;
+}
+
+#wallet-info {
+  margin-top: 25px;
+}
+
+code {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 15px;
+  background: #000;
+  border-radius: 8px;
+}
+
+hr {
+  margin: 30px 0;
+  border: 0;
+  border-top: 1px solid #444;
+}
+
+label {
+  display: block;
+  margin-top: 15px;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: 7px;
+  border: 1px solid #555;
+  font-size: 15px;
+}
+
+#tx-status {
+  margin-top: 15px;
+  overflow-wrap: anywhere;
+}
