@@ -331,3 +331,11 @@ h2 {
       minmax(0, 1.3fr);
   }
 }
+
+#algorithm-card {
+  min-width: 0;
+}
+
+#algorithm-card .stats-grid strong {
+  overflow-wrap: anywhere;
+}

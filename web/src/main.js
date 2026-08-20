@@ -212,6 +212,66 @@ app.innerHTML = `
       </div>
 
       <div
+        id="algorithm-card"
+        class="card"
+        style="display:none;"
+      >
+        <h2>Algorithm Intelligence</h2>
+
+        <div class="stats-grid">
+          <div>
+            <span>Difficulty</span>
+            <strong id="algo-difficulty">--</strong>
+          </div>
+
+          <div>
+            <span>Learned claims</span>
+            <strong id="algo-claims">--</strong>
+          </div>
+
+          <div>
+            <span>Confidence</span>
+            <strong id="algo-confidence">--</strong>
+          </div>
+
+          <div>
+            <span>Robust time</span>
+            <strong id="algo-robust">--</strong>
+          </div>
+
+          <div>
+            <span>Blended estimate</span>
+            <strong id="algo-blended">--</strong>
+          </div>
+
+          <div>
+            <span>Expected time</span>
+            <strong id="algo-expected">--</strong>
+          </div>
+
+          <div>
+            <span>Estimated SOL/s</span>
+            <strong id="algo-sol-second">--</strong>
+          </div>
+
+          <div>
+            <span>Estimated SOL/hour</span>
+            <strong id="algo-sol-hour">--</strong>
+          </div>
+
+          <div>
+            <span>Exploration bonus</span>
+            <strong id="algo-exploration">--</strong>
+          </div>
+
+          <div>
+            <span>Adjusted score</span>
+            <strong id="algo-adjusted">--</strong>
+          </div>
+        </div>
+      </div>
+
+      <div
         id="mining-result"
         class="card"
         style="display:none;"
@@ -297,6 +357,18 @@ const perfRobust = document.querySelector('#perf-robust')
 const perfSamples = document.querySelector('#perf-samples')
 const perfSolHour = document.querySelector('#perf-sol-hour')
 const perfOverhead = document.querySelector('#perf-overhead')
+
+const algorithmCard = document.querySelector('#algorithm-card')
+const algoDifficulty = document.querySelector('#algo-difficulty')
+const algoClaims = document.querySelector('#algo-claims')
+const algoConfidence = document.querySelector('#algo-confidence')
+const algoRobust = document.querySelector('#algo-robust')
+const algoBlended = document.querySelector('#algo-blended')
+const algoExpected = document.querySelector('#algo-expected')
+const algoSolSecond = document.querySelector('#algo-sol-second')
+const algoSolHour = document.querySelector('#algo-sol-hour')
+const algoExploration = document.querySelector('#algo-exploration')
+const algoAdjusted = document.querySelector('#algo-adjusted')
 
 const sendButton = document.querySelector('#send')
 const status = document.querySelector('#status')
@@ -499,6 +571,81 @@ async function mineOneReward() {
     mining.forwardTx || '--'
 
   miningResult.style.display = 'block'
+
+  const algorithm = mining.algorithm || {}
+
+  const learning =
+    Array.isArray(algorithm.learning)
+      ? algorithm.learning.find(
+          item => item.difficulty === mining.difficulty
+        )
+      : null
+
+  const profitability =
+    Array.isArray(algorithm.profitability)
+      ? algorithm.profitability.find(
+          item => item.difficulty === mining.difficulty
+        )
+      : null
+
+  const exploration =
+    Array.isArray(algorithm.exploration)
+      ? algorithm.exploration.find(
+          item => item.difficulty === mining.difficulty
+        )
+      : null
+
+  if (learning || profitability || exploration) {
+    algorithmCard.style.display = 'block'
+
+    algoDifficulty.textContent =
+      String(mining.difficulty ?? '--')
+
+    algoClaims.textContent =
+      learning?.claims != null
+        ? String(learning.claims)
+        : '--'
+
+    algoConfidence.textContent =
+      learning?.confidence != null
+        ? `${learning.confidence.toFixed(0)}%`
+        : '--'
+
+    algoRobust.textContent =
+      learning?.robustSeconds != null
+        ? `${learning.robustSeconds.toFixed(3)} s`
+        : '--'
+
+    algoBlended.textContent =
+      learning?.blendedSeconds != null
+        ? `${learning.blendedSeconds.toFixed(3)} s`
+        : '--'
+
+    algoExpected.textContent =
+      profitability?.expectedSeconds != null
+        ? `${profitability.expectedSeconds.toFixed(3)} s`
+        : '--'
+
+    algoSolSecond.textContent =
+      profitability?.solPerSecond != null
+        ? `${profitability.solPerSecond.toFixed(9)} SOL/s`
+        : '--'
+
+    algoSolHour.textContent =
+      profitability?.solPerHour != null
+        ? `${profitability.solPerHour.toFixed(6)} SOL/h`
+        : '--'
+
+    algoExploration.textContent =
+      exploration?.bonusPercent != null
+        ? `+${exploration.bonusPercent.toFixed(1)}%`
+        : '0.0% — learned'
+
+    algoAdjusted.textContent =
+      exploration?.adjustedScore != null
+        ? exploration.adjustedScore.toFixed(9)
+        : 'Not active'
+  }
 
   perfOverhead.textContent =
     mining.overhead != null

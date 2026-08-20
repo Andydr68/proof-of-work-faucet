@@ -32,6 +32,24 @@ function parseMiningOutput(stdout) {
     /Best faucet selected:\s+(\S+)\s+\|\s+difficulty\s+(\d+)\s+\|\s+reward\s+([0-9.]+)\s+SOL/
   )
 
+  const learningMatches = [
+    ...stdout.matchAll(
+      /Learning: difficulty (\d+) \| claims (\d+) \| confidence ([0-9.]+)% \| robust ([0-9.]+)s \| blended ([0-9.]+)s/g
+    ),
+  ]
+
+  const profitMatches = [
+    ...stdout.matchAll(
+      /Profit estimate: difficulty (\d+) \| reward ([0-9.]+) SOL \| ([0-9.]+)s expected \| ([0-9.]+) SOL\/s/g
+    ),
+  ]
+
+  const explorationMatches = [
+    ...stdout.matchAll(
+      /Exploration: difficulty (\d+) \| claims (\d+) \| bonus \+([0-9.]+)% \| base ([0-9.]+) \| adjusted ([0-9.]+)/g
+    ),
+  ]
+
   const receivedMatch = stdout.match(
     /Received\s+([0-9.]+)\s+SOL from faucet\s+(\S+):\s+(\S+)/
   )
@@ -61,6 +79,32 @@ function parseMiningOutput(stdout) {
       receivedMatch?.[2] ??
       bestMatch?.[1] ??
       null,
+
+    algorithm: {
+      learning: learningMatches.map(match => ({
+        difficulty: Number(match[1]),
+        claims: Number(match[2]),
+        confidence: Number(match[3]),
+        robustSeconds: Number(match[4]),
+        blendedSeconds: Number(match[5]),
+      })),
+
+      profitability: profitMatches.map(match => ({
+        difficulty: Number(match[1]),
+        reward: Number(match[2]),
+        expectedSeconds: Number(match[3]),
+        solPerSecond: Number(match[4]),
+        solPerHour: Number(match[4]) * 3600,
+      })),
+
+      exploration: explorationMatches.map(match => ({
+        difficulty: Number(match[1]),
+        claims: Number(match[2]),
+        bonusPercent: Number(match[3]),
+        baseScore: Number(match[4]),
+        adjustedScore: Number(match[5]),
+      })),
+    },
 
     difficulty:
       bestMatch
