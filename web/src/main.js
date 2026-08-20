@@ -32,6 +32,10 @@ app.innerHTML = `
 
       <button id="refresh">Refresh Balance</button>
 
+      <button id="mine">Mine 1 Reward</button>
+
+      <div id="mine-status"></div>
+
       <hr>
 
       <h2>Send Devnet SOL</h2>
@@ -61,9 +65,11 @@ app.innerHTML = `
 
 const button = document.querySelector('#connect')
 const refreshButton = document.querySelector('#refresh')
+const mineButton = document.querySelector('#mine')
 const sendButton = document.querySelector('#send')
 const status = document.querySelector('#status')
 const txStatus = document.querySelector('#tx-status')
+const mineStatus = document.querySelector('#mine-status')
 const walletInfo = document.querySelector('#wallet-info')
 const addressElement = document.querySelector('#address')
 const balanceElement = document.querySelector('#balance')
@@ -94,6 +100,57 @@ async function refreshBalance() {
     console.error(error)
     balanceElement.textContent =
       `Errore saldo: ${error.message ?? error}`
+  }
+}
+
+async function mineOneReward() {
+  if (!currentAddress) {
+    mineStatus.textContent = 'Connetti prima MetaMask'
+    return
+  }
+
+  try {
+    mineButton.disabled = true
+    mineStatus.textContent =
+      'Mining in corso... attendi la reward'
+
+    const response = await fetch(
+      'http://localhost:3001/api/mine',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipient: currentAddress,
+        }),
+      },
+    )
+
+    const result = await response.json()
+
+    if (!response.ok || !result.ok) {
+      throw new Error(
+        result.error ||
+        result.stderr ||
+        'Mining failed'
+      )
+    }
+
+    mineStatus.textContent =
+      'Reward completata e inoltrata a MetaMask'
+
+    console.log('Mining stdout:', result.stdout)
+
+    await refreshBalance()
+
+  } catch (error) {
+    console.error(error)
+
+    mineStatus.textContent =
+      `Errore mining: ${error.message ?? error}`
+  } finally {
+    mineButton.disabled = false
   }
 }
 
@@ -217,4 +274,5 @@ async function connectMetaMask() {
 
 button.addEventListener('click', connectMetaMask)
 refreshButton.addEventListener('click', refreshBalance)
+mineButton.addEventListener('click', mineOneReward)
 sendButton.addEventListener('click', sendSol)

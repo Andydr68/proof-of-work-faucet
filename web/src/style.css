@@ -79,3 +79,12 @@ input {
   margin-top: 15px;
   overflow-wrap: anywhere;
 }
+
+#mine {
+  margin-left: 10px;
+}
+
+#mine-status {
+  margin-top: 15px;
+  overflow-wrap: anywhere;
+}
