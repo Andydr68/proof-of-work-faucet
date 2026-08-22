@@ -276,6 +276,61 @@ app.innerHTML = `
       </div>
 
       <div
+        id="net-profitability-card"
+        class="card"
+        style="display:none;"
+      >
+        <h2>Net Profitability</h2>
+
+        <div class="stats-grid">
+          <div>
+            <span>Gross reward</span>
+            <strong id="net-gross">--</strong>
+          </div>
+
+          <div>
+            <span>Forwarded reward</span>
+            <strong id="net-forwarded">--</strong>
+          </div>
+
+          <div>
+            <span>Operational overhead</span>
+            <strong id="net-overhead">--</strong>
+          </div>
+
+          <div>
+            <span>Net reward</span>
+            <strong id="net-reward">--</strong>
+          </div>
+
+          <div>
+            <span>Overhead ratio</span>
+            <strong id="net-overhead-ratio">--</strong>
+          </div>
+
+          <div>
+            <span>Net efficiency</span>
+            <strong id="net-efficiency">--</strong>
+          </div>
+
+          <div>
+            <span>Net SOL/hour</span>
+            <strong id="net-sol-hour">--</strong>
+          </div>
+
+          <div>
+            <span>Wallet balance change</span>
+            <strong id="net-wallet-change">--</strong>
+          </div>
+        </div>
+
+        <p class="profitability-note">
+          Net profitability treats forwarded SOL as retained value,
+          not as an operating cost.
+        </p>
+      </div>
+
+      <div
         id="mining-result"
         class="card"
         style="display:none;"
@@ -361,6 +416,21 @@ const perfRobust = document.querySelector('#perf-robust')
 const perfSamples = document.querySelector('#perf-samples')
 const perfSolHour = document.querySelector('#perf-sol-hour')
 const perfOverhead = document.querySelector('#perf-overhead')
+
+const netProfitabilityCard =
+  document.querySelector('#net-profitability-card')
+const netGross = document.querySelector('#net-gross')
+const netForwarded = document.querySelector('#net-forwarded')
+const netOverhead = document.querySelector('#net-overhead')
+const netReward = document.querySelector('#net-reward')
+const netOverheadRatio =
+  document.querySelector('#net-overhead-ratio')
+const netEfficiency =
+  document.querySelector('#net-efficiency')
+const netSolHour =
+  document.querySelector('#net-sol-hour')
+const netWalletChange =
+  document.querySelector('#net-wallet-change')
 
 const algorithmCard = document.querySelector('#algorithm-card')
 const algoDifficulty = document.querySelector('#algo-difficulty')
@@ -649,6 +719,69 @@ async function mineOneReward() {
       exploration?.adjustedScore != null
         ? exploration.adjustedScore.toFixed(9)
         : 'Not active'
+  }
+
+  if (
+    mining.grossReward != null &&
+    mining.overhead != null
+  ) {
+    const gross = Number(mining.grossReward)
+    const overhead = Number(mining.overhead)
+    const forwarded =
+      Number(mining.reward ?? gross)
+
+    const netRewardValue =
+      Math.max(gross - overhead, 0)
+
+    const overheadRatio =
+      gross > 0
+        ? (overhead / gross) * 100
+        : 0
+
+    const efficiency =
+      gross > 0
+        ? (netRewardValue / gross) * 100
+        : 0
+
+    const netSolHourValue =
+      mining.elapsedSeconds > 0
+        ? (
+            netRewardValue /
+            mining.elapsedSeconds
+          ) * 3600
+        : null
+
+    netProfitabilityCard.style.display = 'block'
+
+    netGross.textContent =
+      `${gross.toFixed(9)} SOL`
+
+    netForwarded.textContent =
+      `${forwarded.toFixed(9)} SOL`
+
+    netOverhead.textContent =
+      `${overhead.toFixed(9)} SOL`
+
+    netReward.textContent =
+      `${netRewardValue.toFixed(9)} SOL`
+
+    netOverheadRatio.textContent =
+      `${overheadRatio.toFixed(2)}%`
+
+    netEfficiency.textContent =
+      `${efficiency.toFixed(2)}%`
+
+    netSolHour.textContent =
+      netSolHourValue != null
+        ? `${netSolHourValue.toFixed(6)} SOL/h`
+        : '--'
+
+    netWalletChange.textContent =
+      mining.netBalanceChange != null
+        ? `${Number(
+            mining.netBalanceChange
+          ).toFixed(9)} SOL`
+        : '--'
   }
 
   perfOverhead.textContent =

@@ -339,3 +339,14 @@ h2 {
 #algorithm-card .stats-grid strong {
   overflow-wrap: anywhere;
 }
+
+#net-profitability-card {
+  min-width: 0;
+}
+
+.profitability-note {
+  margin-top: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.65;
+}
