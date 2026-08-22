@@ -350,3 +350,19 @@ h2 {
   line-height: 1.5;
   opacity: 0.65;
 }
+
+.miner-wallet-card {
+  margin-top: 18px;
+}
+
+.miner-address {
+  margin-top: 18px;
+}
+
+.reserve-healthy {
+  background: #163b24;
+}
+
+.reserve-low {
+  background: #4a1c1c;
+}

@@ -84,6 +84,51 @@ app.innerHTML = `
       </div>
     </section>
 
+    <section class="card miner-wallet-card">
+      <div class="card-title-row">
+        <div>
+          <h2>Miner Wallet</h2>
+          <p>Operational Solana Devnet fee wallet</p>
+        </div>
+
+        <div
+          id="miner-reserve-status"
+          class="mine-state"
+        >
+          Checking...
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div>
+          <span>Balance</span>
+          <strong id="miner-balance">--</strong>
+        </div>
+
+        <div>
+          <span>Minimum reserve</span>
+          <strong id="miner-reserve">--</strong>
+        </div>
+
+        <div>
+          <span>Available</span>
+          <strong id="miner-available">--</strong>
+        </div>
+
+        <div>
+          <span>Fee reserve</span>
+          <strong id="miner-health">--</strong>
+        </div>
+      </div>
+
+      <div class="miner-address">
+        <span class="field-label">
+          Miner address
+        </span>
+        <code id="miner-address">--</code>
+      </div>
+    </section>
+
     <section class="card mining-card">
       <div class="card-title-row">
         <div>
@@ -398,6 +443,15 @@ app.innerHTML = `
 
 const button = document.querySelector('#connect')
 const backendStatus = document.querySelector('#backend-status')
+
+const minerBalance = document.querySelector('#miner-balance')
+const minerReserve = document.querySelector('#miner-reserve')
+const minerAvailable = document.querySelector('#miner-available')
+const minerHealth = document.querySelector('#miner-health')
+const minerAddress = document.querySelector('#miner-address')
+const minerReserveStatus =
+  document.querySelector('#miner-reserve-status')
+
 const refreshButton = document.querySelector('#refresh')
 const mineButton = document.querySelector('#mine')
 const stopMineButton = document.querySelector('#stop-mine')
@@ -472,6 +526,56 @@ let stopMiningRequested = false
 const infuraApiKey = import.meta.env.VITE_INFURA_API_KEY
 const devnetRpc = 'https://api.devnet.solana.com'
 const connection = new Connection(devnetRpc, 'confirmed')
+
+async function refreshMinerWallet() {
+  try {
+    const response = await fetch(
+      `${BACKEND_URL}/api/miner-wallet`,
+      {
+        cache: 'no-store',
+      },
+    )
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const wallet = await response.json()
+
+    minerBalance.textContent =
+      `${Number(wallet.balanceSol).toFixed(9)} SOL`
+
+    minerReserve.textContent =
+      `${Number(wallet.reserveSol).toFixed(9)} SOL`
+
+    minerAvailable.textContent =
+      `${Number(wallet.availableForOperations).toFixed(9)} SOL`
+
+    minerAddress.textContent =
+      wallet.address || '--'
+
+    if (wallet.reserveOk) {
+      minerHealth.textContent = 'HEALTHY'
+      minerReserveStatus.textContent = 'Reserve: healthy'
+      minerReserveStatus.className =
+        'mine-state reserve-healthy'
+    } else {
+      minerHealth.textContent = 'LOW'
+      minerReserveStatus.textContent = 'Reserve: low'
+      minerReserveStatus.className =
+        'mine-state reserve-low'
+    }
+  } catch {
+    minerBalance.textContent = '--'
+    minerReserve.textContent = '--'
+    minerAvailable.textContent = '--'
+    minerHealth.textContent = 'OFFLINE'
+    minerReserveStatus.textContent =
+      'Reserve: unavailable'
+    minerReserveStatus.className =
+      'mine-state reserve-low'
+  }
+}
 
 async function refreshBackendStatus() {
   try {
@@ -790,6 +894,7 @@ async function mineOneReward() {
       : '--'
 
   await refreshBalance()
+  await refreshMinerWallet()
   await refreshPerformance()
 
   return mining
@@ -1092,9 +1197,11 @@ async function connectMetaMask() {
 }
 
 refreshBackendStatus()
+refreshMinerWallet()
 refreshPerformance()
 
 setInterval(refreshBackendStatus, 2000)
+setInterval(refreshMinerWallet, 10000)
 setInterval(refreshPerformance, 10000)
 
 button.addEventListener('click', connectMetaMask)

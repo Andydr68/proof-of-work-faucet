@@ -1,15 +1,29 @@
 import express from 'express'
 import cors from 'cors'
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { PublicKey } from '@solana/web3.js'
+import {
+  PublicKey,
+  Connection,
+  LAMPORTS_PER_SOL,
+} from '@solana/web3.js'
 
 const app = express()
 const PORT = Number(process.env.PORT || 3002)
 const REPO_ROOT = path.resolve(process.cwd(), '..')
 const PERFORMANCE_FILE =
   path.join(REPO_ROOT, '.devnet-pow-performance.json')
+
+const DEVNET_RPC =
+  process.env.DEVNET_RPC ||
+  'https://api.devnet.solana.com'
+
+const MINER_RESERVE_SOL =
+  Number(process.env.MINER_RESERVE_SOL || 0.25)
+
+const devnetConnection =
+  new Connection(DEVNET_RPC, 'confirmed')
 
 app.use(cors({
   origin(origin, callback) {
@@ -26,6 +40,56 @@ app.use(cors({
 app.use(express.json())
 
 let mining = false
+
+function getCliAddress() {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'solana',
+      ['address'],
+      {
+        cwd: REPO_ROOT,
+        env: process.env,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(
+            new Error(
+              stderr?.trim() ||
+              error.message
+            )
+          )
+          return
+        }
+
+        resolve(stdout.trim())
+      },
+    )
+  })
+}
+
+async function getMinerWalletStatus() {
+  const address = await getCliAddress()
+  const publicKey = new PublicKey(address)
+
+  const lamports =
+    await devnetConnection.getBalance(publicKey)
+
+  const balanceSol =
+    lamports / LAMPORTS_PER_SOL
+
+  return {
+    address,
+    balanceSol,
+    reserveSol: MINER_RESERVE_SOL,
+    availableForOperations:
+      Math.max(
+        balanceSol - MINER_RESERVE_SOL,
+        0,
+      ),
+    reserveOk:
+      balanceSol > MINER_RESERVE_SOL,
+  }
+}
 
 function parseMiningOutput(stdout) {
   const bestMatch = stdout.match(
@@ -242,6 +306,23 @@ app.get('/api/performance', async (req, res) => {
   }
 })
 
+app.get('/api/miner-wallet', async (req, res) => {
+  try {
+    const wallet =
+      await getMinerWalletStatus()
+
+    res.json({
+      ok: true,
+      ...wallet,
+    })
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error.message,
+    })
+  }
+})
+
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
@@ -249,7 +330,7 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-app.post('/api/mine', (req, res) => {
+app.post('/api/mine', async (req, res) => {
   if (mining) {
     return res.status(409).json({
       ok: false,
@@ -272,6 +353,31 @@ app.post('/api/mine', (req, res) => {
     return res.status(400).json({
       ok: false,
       error: 'Invalid Solana recipient address',
+    })
+  }
+
+  let minerWallet
+
+  try {
+    minerWallet =
+      await getMinerWalletStatus()
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error:
+        `Unable to read miner wallet: ${error.message}`,
+    })
+  }
+
+  if (!minerWallet.reserveOk) {
+    return res.status(409).json({
+      ok: false,
+      error:
+        `Miner reserve protection triggered. ` +
+        `Balance ${minerWallet.balanceSol.toFixed(9)} SOL, ` +
+        `minimum reserve ${minerWallet.reserveSol.toFixed(9)} SOL.`,
+      reserveProtection: true,
+      minerWallet,
     })
   }
 
