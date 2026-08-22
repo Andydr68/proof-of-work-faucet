@@ -6,7 +6,7 @@ import path from 'node:path'
 import { PublicKey } from '@solana/web3.js'
 
 const app = express()
-const PORT = 3001
+const PORT = Number(process.env.PORT || 3002)
 const REPO_ROOT = path.resolve(process.cwd(), '..')
 const PERFORMANCE_FILE =
   path.join(REPO_ROOT, '.devnet-pow-performance.json')

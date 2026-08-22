@@ -1,4 +1,8 @@
 import './style.css'
+
+const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  'http://localhost:3002'
 import {
   createSolanaClient,
   getInfuraRpcUrls,
@@ -402,7 +406,7 @@ const connection = new Connection(devnetRpc, 'confirmed')
 async function refreshBackendStatus() {
   try {
     const response = await fetch(
-      'http://localhost:3001/api/health',
+      `${BACKEND_URL}/api/health`,
       {
         cache: 'no-store',
       },
@@ -433,7 +437,7 @@ async function refreshBackendStatus() {
 async function refreshPerformance() {
   try {
     const response = await fetch(
-      'http://localhost:3001/api/performance',
+      `${BACKEND_URL}/api/performance`,
       {
         cache: 'no-store',
       },
@@ -503,7 +507,7 @@ async function mineOneReward() {
 
   try {
     response = await fetch(
-      'http://localhost:3001/api/mine',
+      `${BACKEND_URL}/api/mine`,
       {
         method: 'POST',
         headers: {
