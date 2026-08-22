@@ -41,6 +41,36 @@ app.use(express.json())
 
 let mining = false
 
+const MAX_OVERHEAD_SAMPLES = 20
+const DEFAULT_OVERHEAD_PER_REWARD = 0.00090588
+const overheadSamples = []
+
+function recordOverhead(value) {
+  const overhead = Number(value)
+
+  if (!Number.isFinite(overhead) || overhead < 0) {
+    return
+  }
+
+  overheadSamples.push(overhead)
+
+  while (overheadSamples.length > MAX_OVERHEAD_SAMPLES) {
+    overheadSamples.shift()
+  }
+}
+
+function getAverageOverhead() {
+  if (overheadSamples.length === 0) {
+    return DEFAULT_OVERHEAD_PER_REWARD
+  }
+
+  return (
+    overheadSamples.reduce((sum, value) => sum + value, 0) /
+    overheadSamples.length
+  )
+}
+
+
 function getCliAddress() {
   return new Promise((resolve, reject) => {
     execFile(
@@ -88,6 +118,10 @@ async function getMinerWalletStatus() {
       ),
     reserveOk:
       balanceSol > MINER_RESERVE_SOL,
+    averageOverheadPerReward:
+      getAverageOverhead(),
+    overheadSamples:
+      overheadSamples.length,
   }
 }
 
@@ -441,6 +475,10 @@ app.post('/api/mine', async (req, res) => {
 
     const miningData =
       parseMiningOutput(stdout)
+
+    if (miningData.overhead != null) {
+      recordOverhead(miningData.overhead)
+    }
 
     console.log('Parsed mining data:', miningData)
 

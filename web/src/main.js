@@ -129,6 +129,16 @@ app.innerHTML = `
           <span>Estimated fee runway</span>
           <strong id="miner-runway">--</strong>
         </div>
+
+        <div>
+          <span>Average overhead</span>
+          <strong id="miner-average-overhead">--</strong>
+        </div>
+
+        <div>
+          <span>Overhead samples</span>
+          <strong id="miner-overhead-samples">--</strong>
+        </div>
       </div>
 
       <div class="miner-address">
@@ -462,6 +472,10 @@ const minerEstimatedRewards =
   document.querySelector('#miner-estimated-rewards')
 const minerRunway =
   document.querySelector('#miner-runway')
+const minerAverageOverhead =
+  document.querySelector('#miner-average-overhead')
+const minerOverheadSamples =
+  document.querySelector('#miner-overhead-samples')
 const minerAddress = document.querySelector('#miner-address')
 const minerReserveStatus =
   document.querySelector('#miner-reserve-status')
@@ -569,7 +583,10 @@ async function refreshMinerWallet() {
       wallet.address || '--'
 
     const estimatedOverheadPerReward =
-      0.00090588
+      Number(
+        wallet.averageOverheadPerReward ??
+        0.00090588
+      )
 
     const estimatedRewards =
       estimatedOverheadPerReward > 0
@@ -587,6 +604,16 @@ async function refreshMinerWallet() {
     minerRunway.textContent =
       estimatedRewards != null
         ? `~${estimatedRewards} rewards`
+        : '--'
+
+    minerAverageOverhead.textContent =
+      Number.isFinite(estimatedOverheadPerReward)
+        ? `${estimatedOverheadPerReward.toFixed(9)} SOL`
+        : '--'
+
+    minerOverheadSamples.textContent =
+      wallet.overheadSamples != null
+        ? String(wallet.overheadSamples)
         : '--'
 
     if (wallet.reserveOk) {
