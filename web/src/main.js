@@ -119,6 +119,16 @@ app.innerHTML = `
           <span>Fee reserve</span>
           <strong id="miner-health">--</strong>
         </div>
+
+        <div>
+          <span>Estimated remaining rewards</span>
+          <strong id="miner-estimated-rewards">--</strong>
+        </div>
+
+        <div>
+          <span>Estimated fee runway</span>
+          <strong id="miner-runway">--</strong>
+        </div>
       </div>
 
       <div class="miner-address">
@@ -448,6 +458,10 @@ const minerBalance = document.querySelector('#miner-balance')
 const minerReserve = document.querySelector('#miner-reserve')
 const minerAvailable = document.querySelector('#miner-available')
 const minerHealth = document.querySelector('#miner-health')
+const minerEstimatedRewards =
+  document.querySelector('#miner-estimated-rewards')
+const minerRunway =
+  document.querySelector('#miner-runway')
 const minerAddress = document.querySelector('#miner-address')
 const minerReserveStatus =
   document.querySelector('#miner-reserve-status')
@@ -553,6 +567,27 @@ async function refreshMinerWallet() {
 
     minerAddress.textContent =
       wallet.address || '--'
+
+    const estimatedOverheadPerReward =
+      0.00090588
+
+    const estimatedRewards =
+      estimatedOverheadPerReward > 0
+        ? Math.floor(
+            Number(wallet.availableForOperations) /
+            estimatedOverheadPerReward
+          )
+        : null
+
+    minerEstimatedRewards.textContent =
+      estimatedRewards != null
+        ? String(estimatedRewards)
+        : '--'
+
+    minerRunway.textContent =
+      estimatedRewards != null
+        ? `~${estimatedRewards} rewards`
+        : '--'
 
     if (wallet.reserveOk) {
       minerHealth.textContent = 'HEALTHY'
