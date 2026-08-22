@@ -186,6 +186,9 @@ impl DifficultyPerformance {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PerformanceHistory {
     difficulties: BTreeMap<u8, DifficultyPerformance>,
+
+    #[serde(default)]
+    overhead_samples: Vec<f64>,
 }
 
 fn performance_history_path() -> PathBuf {

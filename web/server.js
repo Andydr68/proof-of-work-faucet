@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import { spawn, execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   PublicKey,
@@ -44,8 +44,74 @@ let mining = false
 const MAX_OVERHEAD_SAMPLES = 20
 const DEFAULT_OVERHEAD_PER_REWARD = 0.00090588
 const overheadSamples = []
+let overheadHistoryLoaded = false
 
-function recordOverhead(value) {
+async function ensureOverheadHistoryLoaded() {
+  if (overheadHistoryLoaded) return
+
+  overheadHistoryLoaded = true
+
+  try {
+    const raw = await readFile(
+      PERFORMANCE_FILE,
+      'utf8',
+    )
+
+    const history = JSON.parse(raw)
+
+    if (Array.isArray(history.overhead_samples)) {
+      overheadSamples.push(
+        ...history.overhead_samples
+          .map(Number)
+          .filter(
+            value =>
+              Number.isFinite(value) &&
+              value >= 0
+          )
+          .slice(-MAX_OVERHEAD_SAMPLES)
+      )
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.warn(
+        'Unable to load overhead history:',
+        error.message,
+      )
+    }
+  }
+}
+
+async function saveOverheadHistory() {
+  let history = {
+    difficulties: {},
+  }
+
+  try {
+    const raw = await readFile(
+      PERFORMANCE_FILE,
+      'utf8',
+    )
+
+    history = JSON.parse(raw)
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  history.overhead_samples =
+    overheadSamples.slice(-MAX_OVERHEAD_SAMPLES)
+
+  await writeFile(
+    PERFORMANCE_FILE,
+    JSON.stringify(history, null, 2) + '\n',
+    'utf8',
+  )
+}
+
+async function recordOverhead(value) {
+  await ensureOverheadHistoryLoaded()
+
   const overhead = Number(value)
 
   if (!Number.isFinite(overhead) || overhead < 0) {
@@ -57,6 +123,8 @@ function recordOverhead(value) {
   while (overheadSamples.length > MAX_OVERHEAD_SAMPLES) {
     overheadSamples.shift()
   }
+
+  await saveOverheadHistory()
 }
 
 function getAverageOverhead() {
@@ -98,6 +166,8 @@ function getCliAddress() {
 }
 
 async function getMinerWalletStatus() {
+  await ensureOverheadHistoryLoaded()
+
   const address = await getCliAddress()
   const publicKey = new PublicKey(address)
 
@@ -461,7 +531,7 @@ app.post('/api/mine', async (req, res) => {
     })
   })
 
-  child.on('close', code => {
+  child.on('close', async code => {
     mining = false
 
     if (responded) return
@@ -477,7 +547,14 @@ app.post('/api/mine', async (req, res) => {
       parseMiningOutput(stdout)
 
     if (miningData.overhead != null) {
-      recordOverhead(miningData.overhead)
+      try {
+        await recordOverhead(miningData.overhead)
+      } catch (error) {
+        console.warn(
+          'Unable to persist overhead sample:',
+          error.message,
+        )
+      }
     }
 
     console.log('Parsed mining data:', miningData)
