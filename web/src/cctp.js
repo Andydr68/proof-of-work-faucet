@@ -249,6 +249,59 @@ function formatUsdc(value) {
 }
 
 
+
+async function getSolanaUsdcBalanceRaw(ata) {
+  const response = await fetch(
+    'https://api.devnet.solana.com',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountBalance',
+        params: [
+          ata.toBase58(),
+          {
+            commitment: 'confirmed',
+          },
+        ],
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `Solana RPC: HTTP ${response.status}`
+    )
+  }
+
+  const data = await response.json()
+
+  if (data.error) {
+    throw new Error(
+      `Solana RPC: ${
+        data.error.message ||
+        JSON.stringify(data.error)
+      }`
+    )
+  }
+
+  const amount =
+    data.result?.value?.amount
+
+  if (amount == null) {
+    throw new Error(
+      'Saldo USDC Solana non disponibile'
+    )
+  }
+
+  return BigInt(amount)
+}
+
+
 function parseUsdc(value) {
   const text = String(value).trim()
 
@@ -745,6 +798,13 @@ export async function runCctpTest({
       `${SOLANA_DESTINATION.toBase58()} → ATA ${ata.toBase58()}`
 
     statusElement.textContent =
+      'Controllo saldo USDC iniziale su Solana Devnet...'
+
+    const solanaBalanceBefore =
+      await getSolanaUsdcBalanceRaw(ata)
+
+    statusElement.textContent =
+      `Saldo Solana iniziale: ${formatUsdc(solanaBalanceBefore)} USDC. ` +
       `Controllo saldo USDC su ${config.name}...`
 
     const balance =
@@ -983,10 +1043,57 @@ export async function runCctpTest({
       )
     }
 
+    let solanaBalanceAfter = null
+    let solanaVerified = false
+
+    const expectedSolanaBalance =
+      solanaBalanceBefore +
+      transferAmount
+
     if (forwardTxHash) {
       statusElement.textContent =
-        `SUCCESS ✅ ${formatUsdc(transferAmount)} USDC ` +
-        `${config.name} → Solana Devnet. ` +
+        `Forward Circle rilevato. Verifico il mint su Solana Devnet...`
+
+      for (
+        let attempt = 0;
+        attempt < 120;
+        attempt += 1
+      ) {
+        try {
+          solanaBalanceAfter =
+            await getSolanaUsdcBalanceRaw(ata)
+
+          if (
+            solanaBalanceAfter >=
+            expectedSolanaBalance
+          ) {
+            solanaVerified = true
+            break
+          }
+        } catch (error) {
+          console.warn(
+            'Solana balance verification attempt failed:',
+            error
+          )
+        }
+
+        await new Promise(resolve =>
+          setTimeout(resolve, 2500)
+        )
+      }
+    }
+
+    if (
+      forwardTxHash &&
+      solanaVerified
+    ) {
+      statusElement.textContent =
+        `SUCCESS ✅ ${formatUsdc(transferAmount)} USDC received on Solana Devnet. ` +
+        `Balance: ${formatUsdc(solanaBalanceAfter)} USDC. ` +
+        `Mint TX: ${forwardTxHash}`
+    } else if (forwardTxHash) {
+      statusElement.textContent =
+        `Forward Circle completato ✅ ma il saldo Solana non è ancora verificato. ` +
         `Mint TX: ${forwardTxHash}`
     } else {
       statusElement.textContent =
@@ -1005,6 +1112,9 @@ export async function runCctpTest({
       transferAmount,
       maxFee,
       totalAmount,
+      solanaBalanceBefore,
+      solanaBalanceAfter,
+      solanaVerified,
     }
 
   } catch (error) {

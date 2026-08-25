@@ -1450,25 +1450,38 @@ async function refreshCctpPreflight() {
       transferButton: cctpButton,
     })
 
-  if (result?.ready) {
-    cctpStatus.textContent =
-      'Ready to transfer'
-  } else if (result?.error) {
-    cctpStatus.textContent =
-      `Preflight failed: ${
-        result.error.shortMessage ||
-        result.error.message ||
-        result.error
-      }`
-  } else if (
-    result?.reason ===
-    'wallet-not-connected'
-  ) {
-    cctpStatus.textContent =
-      'Connect MetaMask EVM to continue'
-  } else {
-    cctpStatus.textContent =
-      'Transfer unavailable — check preflight'
+  const preserveFinalStatus =
+    cctpStatus.textContent.startsWith(
+      'SUCCESS ✅'
+    ) ||
+    cctpStatus.textContent.startsWith(
+      'Forward Circle completato ✅'
+    ) ||
+    cctpStatus.textContent.startsWith(
+      'Burn completato ✅'
+    )
+
+  if (!preserveFinalStatus) {
+    if (result?.ready) {
+      cctpStatus.textContent =
+        'Ready to transfer'
+    } else if (result?.error) {
+      cctpStatus.textContent =
+        `Preflight failed: ${
+          result.error.shortMessage ||
+          result.error.message ||
+          result.error
+        }`
+    } else if (
+      result?.reason ===
+      'wallet-not-connected'
+    ) {
+      cctpStatus.textContent =
+        'Connect MetaMask EVM to continue'
+    } else {
+      cctpStatus.textContent =
+        'Transfer unavailable — check preflight'
+    }
   }
 
   // Ignora risultati vecchi se nel frattempo
