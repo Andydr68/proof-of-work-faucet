@@ -156,6 +156,16 @@ app.innerHTML = `
           --
         </strong>
 
+        <span>Estimated gas needed</span>
+        <strong id="cctp-gas-needed">
+          --
+        </strong>
+
+        <span>Gas missing</span>
+        <strong id="cctp-gas-missing">
+          --
+        </strong>
+
         <span>Circle fee</span>
         <strong id="cctp-fee">
           --
@@ -591,6 +601,12 @@ const cctpUsdcBalance =
 
 const cctpNativeBalance =
   document.querySelector('#cctp-native-balance')
+
+const cctpGasNeeded =
+  document.querySelector('#cctp-gas-needed')
+
+const cctpGasMissing =
+  document.querySelector('#cctp-gas-missing')
 
 const cctpTotal =
   document.querySelector('#cctp-total')
@@ -1422,6 +1438,10 @@ async function refreshCctpPreflight() {
         cctpUsdcBalance,
       nativeBalanceElement:
         cctpNativeBalance,
+      gasNeededElement:
+        cctpGasNeeded,
+      gasMissingElement:
+        cctpGasMissing,
       feeElement: cctpFee,
       totalElement: cctpTotal,
       maxElement: cctpMax,

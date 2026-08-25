@@ -287,6 +287,8 @@ export async function runCctpPreflight({
   feeElement,
   totalElement,
   maxElement,
+  gasNeededElement,
+  gasMissingElement,
   readinessElement,
   transferButton,
 }) {
@@ -318,6 +320,14 @@ export async function runCctpPreflight({
     feeElement.textContent = '--'
     totalElement.textContent = '--'
     maxElement.textContent = '--'
+
+    if (gasNeededElement) {
+      gasNeededElement.textContent = '--'
+    }
+
+    if (gasMissingElement) {
+      gasMissingElement.textContent = '--'
+    }
 
     const accounts =
       await window.ethereum.request({
@@ -446,6 +456,81 @@ export async function runCctpPreflight({
           )
         : 0n
 
+    let estimatedNativeGas = null
+    let gasEstimateError = null
+
+    try {
+      const approveData =
+        encodeFunctionData({
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [
+            TOKEN_MESSENGER_V2,
+            totalAmount,
+          ],
+        })
+
+      const [
+        approveGas,
+        feeEstimate,
+      ] = await Promise.all([
+        publicClient.estimateGas({
+          account,
+          to: config.usdc,
+          data: approveData,
+        }),
+
+        publicClient.estimateFeesPerGas(),
+      ])
+
+      const gasPrice =
+        feeEstimate.maxFeePerGas ??
+        feeEstimate.gasPrice
+
+      if (gasPrice != null) {
+        /*
+         * Il BURN non può essere stimato correttamente
+         * prima dell'APPROVE:
+         *
+         * depositForBurnWithHook() esegue transferFrom()
+         * e l'eth_estimateGas fallirebbe con:
+         *
+         * ERC20: transfer amount exceeds allowance
+         *
+         * Usiamo quindi:
+         * - APPROVE: stima reale
+         * - BURN: budget prudenziale di 500.000 gas
+         *
+         * La transazione BURN reale continuerà ad avere
+         * la propria gestione dinamica delle fee.
+         */
+        const burnGasBudget =
+          500_000n
+
+        const totalGas =
+          approveGas +
+          burnGasBudget
+
+        // Margine extra del 25%.
+        const bufferedGas =
+          (totalGas * 125n) / 100n
+
+        const bufferedGasPrice =
+          (gasPrice * 125n) / 100n
+
+        estimatedNativeGas =
+          bufferedGas *
+          bufferedGasPrice
+      }
+    } catch (error) {
+      gasEstimateError = error
+      console.warn(
+        'CCTP gas estimate unavailable:',
+        error
+      )
+    }
+
+
     feeElement.textContent =
       `${formatUsdc(maxFee)} USDC`
 
@@ -461,9 +546,44 @@ export async function runCctpPreflight({
     const gasPresent =
       nativeBalance > 0n
 
+    const gasEnough =
+      estimatedNativeGas != null
+        ? nativeBalance >= estimatedNativeGas
+        : gasPresent
+
+    const gasMissing =
+      estimatedNativeGas != null &&
+      nativeBalance < estimatedNativeGas
+        ? estimatedNativeGas - nativeBalance
+        : 0n
+
+    if (gasNeededElement) {
+      gasNeededElement.textContent =
+        estimatedNativeGas != null
+          ? `${Number(
+              formatEther(
+                estimatedNativeGas
+              )
+            ).toFixed(6)} ${nativeSymbol}`
+          : 'Estimate unavailable'
+    }
+
+    if (gasMissingElement) {
+      gasMissingElement.textContent =
+        gasEstimateError
+          ? 'Estimate unavailable'
+          : gasMissing > 0n
+            ? `${Number(
+                formatEther(
+                  gasMissing
+                )
+              ).toFixed(6)} ${nativeSymbol}`
+            : `0.000000 ${nativeSymbol}`
+    }
+
     const ready =
       usdcEnough &&
-      gasPresent
+      gasEnough
 
     if (ready) {
       readinessElement.textContent =
@@ -482,10 +602,22 @@ export async function runCctpPreflight({
         )
       }
 
-      if (!gasPresent) {
-        reasons.push(
-          `manca ${nativeSymbol} per il gas`
-        )
+      if (!gasEnough) {
+        if (
+          estimatedNativeGas != null
+        ) {
+          reasons.push(
+            `gas insufficiente: manca ${Number(
+              formatEther(
+                gasMissing
+              )
+            ).toFixed(6)} ${nativeSymbol}`
+          )
+        } else {
+          reasons.push(
+            `manca ${nativeSymbol} per il gas`
+          )
+        }
       }
 
       readinessElement.textContent =
@@ -507,6 +639,9 @@ export async function runCctpPreflight({
       maxFee,
       totalAmount,
       maxTransferable,
+      estimatedNativeGas,
+      gasMissing,
+      gasEstimateError,
     }
 
   } catch (error) {
