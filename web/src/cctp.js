@@ -47,6 +47,12 @@ const NETWORKS = {
     domain: 6,
     usdc:
       '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    rpcUrls: [
+      'https://sepolia.base.org',
+    ],
+    explorerUrls: [
+      'https://sepolia.basescan.org',
+    ],
   },
 
   sepolia: {
@@ -55,6 +61,12 @@ const NETWORKS = {
     domain: 0,
     usdc:
       '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    rpcUrls: [
+      'https://ethereum-sepolia-rpc.publicnode.com',
+    ],
+    explorerUrls: [
+      'https://sepolia.etherscan.io',
+    ],
   },
 
   arbitrumSepolia: {
@@ -63,6 +75,12 @@ const NETWORKS = {
     domain: 3,
     usdc:
       '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
+    rpcUrls: [
+      'https://sepolia-rollup.arbitrum.io/rpc',
+    ],
+    explorerUrls: [
+      'https://sepolia.arbiscan.io',
+    ],
   },
 
   optimismSepolia: {
@@ -71,6 +89,12 @@ const NETWORKS = {
     domain: 2,
     usdc:
       '0x5fd84259d66Cd46123540766Be93DFE6D43130D7',
+    rpcUrls: [
+      'https://sepolia.optimism.io',
+    ],
+    explorerUrls: [
+      'https://sepolia-optimism.etherscan.io',
+    ],
   },
 
   polygonAmoy: {
@@ -79,6 +103,12 @@ const NETWORKS = {
     domain: 7,
     usdc:
       '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
+    rpcUrls: [
+      'https://polygon-amoy.drpc.org',
+    ],
+    explorerUrls: [
+      'https://amoy.polygonscan.com',
+    ],
   },
 
   avalancheFuji: {
@@ -87,7 +117,81 @@ const NETWORKS = {
     domain: 1,
     usdc:
       '0x5425890298aed601595a70AB815c96711a31Bc65',
+    rpcUrls: [
+      'https://api.avax-test.network/ext/bc/C/rpc',
+    ],
+    explorerUrls: [
+      'https://testnet.snowtrace.io',
+    ],
   },
+}
+
+
+
+async function ensureWalletChain(config) {
+  if (!window.ethereum) {
+    throw new Error(
+      'Provider EVM MetaMask non trovato'
+    )
+  }
+
+  const chainIdHex =
+    `0x${config.chain.id.toString(16)}`
+
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [
+        {
+          chainId: chainIdHex,
+        },
+      ],
+    })
+
+    return
+  } catch (switchError) {
+    const code =
+      switchError?.code ??
+      switchError?.data?.originalError?.code
+
+    // 4902 = chain non conosciuta da MetaMask
+    if (code !== 4902) {
+      throw switchError
+    }
+  }
+
+  await window.ethereum.request({
+    method: 'wallet_addEthereumChain',
+    params: [
+      {
+        chainId: chainIdHex,
+        chainName: config.name,
+        nativeCurrency: {
+          name:
+            config.chain.nativeCurrency.name,
+          symbol:
+            config.chain.nativeCurrency.symbol,
+          decimals:
+            config.chain.nativeCurrency.decimals,
+        },
+        rpcUrls:
+          config.rpcUrls,
+        blockExplorerUrls:
+          config.explorerUrls,
+      },
+    ],
+  })
+
+  // Alcune versioni di MetaMask aggiungono la rete
+  // ma non la rendono attiva automaticamente.
+  await window.ethereum.request({
+    method: 'wallet_switchEthereumChain',
+    params: [
+      {
+        chainId: chainIdHex,
+      },
+    ],
+  })
 }
 
 
@@ -471,9 +575,7 @@ export async function runCctpTest({
       })
 
     try {
-      await walletClient.switchChain({
-        id: config.chain.id,
-      })
+      await ensureWalletChain(config)
     } catch (error) {
       throw new Error(
         `Impossibile passare a ${config.name}: ` +
