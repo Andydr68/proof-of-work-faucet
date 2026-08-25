@@ -6,3 +6,7 @@ target
 node_modules
 test-ledger
 .devnet-pow-performance.json
+
+# Local development backups
+*.backup-*
+*.pre-*
