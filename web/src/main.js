@@ -1,4 +1,5 @@
 import './style.css'
+import { runCctpTest } from './cctp.js'
 
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ||
@@ -81,6 +82,78 @@ app.innerHTML = `
             </button>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="card cctp-card">
+      <div class="card-title-row">
+        <div>
+          <h2>CCTP Bridge Test</h2>
+          <p>Base Sepolia → Solana Devnet</p>
+        </div>
+
+        <button id="cctp-transfer">
+          Transfer USDC
+        </button>
+      </div>
+
+      <div style="margin:16px 0; display:flex; gap:20px; flex-wrap:wrap; align-items:end;">
+        <div>
+          <label for="cctp-network">
+            Source network
+          </label>
+
+          <select
+            id="cctp-network"
+            style="display:block; margin-top:8px; min-width:220px;"
+          >
+            <option value="baseSepolia">Base Sepolia</option>
+            <option value="sepolia">Ethereum Sepolia</option>
+            <option value="arbitrumSepolia">Arbitrum Sepolia</option>
+            <option value="optimismSepolia">OP Sepolia</option>
+            <option value="polygonAmoy">Polygon Amoy</option>
+            <option value="avalancheFuji">Avalanche Fuji</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="cctp-amount">
+            Amount USDC
+          </label>
+
+          <input
+            id="cctp-amount"
+            type="number"
+            min="0.000001"
+            step="0.000001"
+            value="18"
+            style="display:block; margin-top:8px; width:140px;"
+          >
+        </div>
+      </div>
+
+      <div class="result-grid">
+        <span>Source</span>
+        <code id="cctp-source">
+          MetaMask EVM
+        </code>
+
+        <span>Destination</span>
+        <code id="cctp-destination">
+          Solana Devnet
+        </code>
+
+        <span>Circle fee</span>
+        <strong id="cctp-fee">
+          --
+        </strong>
+      </div>
+
+      <div
+        id="cctp-status"
+        style="margin-top:16px;"
+      >
+        Ready — choose amount and transfer
       </div>
     </section>
 
@@ -460,6 +533,27 @@ app.innerHTML = `
     </section>
   </div>
 `
+
+const cctpButton =
+  document.querySelector('#cctp-transfer')
+
+const cctpAmount =
+  document.querySelector('#cctp-amount')
+
+const cctpNetwork =
+  document.querySelector('#cctp-network')
+
+const cctpStatus =
+  document.querySelector('#cctp-status')
+
+const cctpSource =
+  document.querySelector('#cctp-source')
+
+const cctpDestination =
+  document.querySelector('#cctp-destination')
+
+const cctpFee =
+  document.querySelector('#cctp-fee')
 
 const button = document.querySelector('#connect')
 const backendStatus = document.querySelector('#backend-status')
@@ -1265,6 +1359,30 @@ refreshPerformance()
 setInterval(refreshBackendStatus, 2000)
 setInterval(refreshMinerWallet, 10000)
 setInterval(refreshPerformance, 10000)
+
+async function handleCctpTransfer() {
+  cctpButton.disabled = true
+
+  try {
+    await runCctpTest({
+      networkElement: cctpNetwork,
+      amountElement: cctpAmount,
+      statusElement: cctpStatus,
+      sourceElement: cctpSource,
+      destinationElement: cctpDestination,
+      feeElement: cctpFee,
+    })
+  } catch {
+    // Il messaggio completo viene già mostrato da cctp.js
+  } finally {
+    cctpButton.disabled = false
+  }
+}
+
+cctpButton.addEventListener(
+  'click',
+  handleCctpTransfer
+)
 
 button.addEventListener('click', connectMetaMask)
 refreshButton.addEventListener('click', refreshBalance)
