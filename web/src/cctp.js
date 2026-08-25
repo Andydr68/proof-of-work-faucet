@@ -2,6 +2,8 @@ import {
   createWalletClient,
   createPublicClient,
   custom,
+  http,
+  formatEther,
   encodeFunctionData,
   bytesToHex,
   zeroHash,
@@ -169,6 +171,263 @@ function parseUsdc(value) {
   }
 
   return amount
+}
+
+
+
+export async function runCctpPreflight({
+  networkElement,
+  amountElement,
+  usdcBalanceElement,
+  nativeBalanceElement,
+  feeElement,
+  totalElement,
+  maxElement,
+  readinessElement,
+  transferButton,
+}) {
+  try {
+    if (!window.ethereum) {
+      throw new Error(
+        'Provider EVM MetaMask non trovato'
+      )
+    }
+
+    const config =
+      NETWORKS[networkElement.value]
+
+    if (!config) {
+      throw new Error(
+        'Rete sorgente non supportata'
+      )
+    }
+
+    transferButton.disabled = true
+
+    readinessElement.textContent =
+      'CHECKING...'
+    readinessElement.className =
+      'mine-state'
+
+    usdcBalanceElement.textContent = '--'
+    nativeBalanceElement.textContent = '--'
+    feeElement.textContent = '--'
+    totalElement.textContent = '--'
+    maxElement.textContent = '--'
+
+    const accounts =
+      await window.ethereum.request({
+        method: 'eth_accounts',
+      })
+
+    if (!accounts?.length) {
+      readinessElement.textContent =
+        'CONNECT EVM'
+
+      transferButton.disabled = false
+
+      return {
+        ready: false,
+        reason: 'wallet-not-connected',
+      }
+    }
+
+    const account = accounts[0]
+
+    // Il preflight usa l'RPC pubblico della chain,
+    // quindi NON forza uno switch di rete in MetaMask.
+    const publicClient =
+      createPublicClient({
+        chain: config.chain,
+        transport: http(),
+      })
+
+    const [
+      balance,
+      nativeBalance,
+    ] = await Promise.all([
+      publicClient.readContract({
+        address: config.usdc,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [account],
+      }),
+
+      publicClient.getBalance({
+        address: account,
+      }),
+    ])
+
+    const transferAmount =
+      parseUsdc(amountElement.value)
+
+    usdcBalanceElement.textContent =
+      `${formatUsdc(balance)} USDC`
+
+    const nativeSymbol =
+      config.chain.nativeCurrency.symbol
+
+    nativeBalanceElement.textContent =
+      `${Number(
+        formatEther(nativeBalance)
+      ).toFixed(6)} ${nativeSymbol}`
+
+    const feeResponse =
+      await fetch(
+        `https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/${config.domain}/${DESTINATION_DOMAIN}?forward=true`,
+        {
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+        }
+      )
+
+    if (!feeResponse.ok) {
+      throw new Error(
+        `Circle fee API: HTTP ${feeResponse.status}`
+      )
+    }
+
+    const fees =
+      await feeResponse.json()
+
+    if (
+      !Array.isArray(fees) ||
+      !fees.length
+    ) {
+      throw new Error(
+        'Circle non ha restituito le fee CCTP'
+      )
+    }
+
+    const feeData = fees[0]
+
+    const forwardFee =
+      BigInt(feeData.forwardFee.med)
+
+    const minimumFeeBps =
+      Number(feeData.minimumFee)
+
+    const rateUnits =
+      BigInt(
+        Math.round(
+          minimumFeeBps * 100
+        )
+      )
+
+    const protocolFee =
+      (
+        transferAmount *
+        rateUnits
+      ) / 1_000_000n
+
+    const maxFee =
+      forwardFee + protocolFee
+
+    const totalAmount =
+      transferAmount + maxFee
+
+    // Massimo trasferibile tenendo conto
+    // sia della fee fissa sia di quella proporzionale.
+    const maxTransferable =
+      balance > forwardFee
+        ? (
+            (balance - forwardFee) *
+            1_000_000n
+          ) /
+          (
+            1_000_000n +
+            rateUnits
+          )
+        : 0n
+
+    feeElement.textContent =
+      `${formatUsdc(maxFee)} USDC`
+
+    totalElement.textContent =
+      `${formatUsdc(totalAmount)} USDC`
+
+    maxElement.textContent =
+      `${formatUsdc(maxTransferable)} USDC`
+
+    const usdcEnough =
+      balance >= totalAmount
+
+    const gasPresent =
+      nativeBalance > 0n
+
+    const ready =
+      usdcEnough &&
+      gasPresent
+
+    if (ready) {
+      readinessElement.textContent =
+        'READY'
+
+      readinessElement.className =
+        'mine-state reserve-healthy'
+
+      transferButton.disabled = false
+    } else {
+      const reasons = []
+
+      if (!usdcEnough) {
+        reasons.push(
+          'USDC insufficienti'
+        )
+      }
+
+      if (!gasPresent) {
+        reasons.push(
+          `manca ${nativeSymbol} per il gas`
+        )
+      }
+
+      readinessElement.textContent =
+        `NOT READY — ${reasons.join(', ')}`
+
+      readinessElement.className =
+        'mine-state reserve-low'
+
+      transferButton.disabled = true
+    }
+
+    return {
+      ready,
+      account,
+      network: config.name,
+      balance,
+      nativeBalance,
+      transferAmount,
+      maxFee,
+      totalAmount,
+      maxTransferable,
+    }
+
+  } catch (error) {
+    console.error(
+      'CCTP preflight error:',
+      error
+    )
+
+    readinessElement.textContent =
+      `NOT READY — ${
+        error.shortMessage ||
+        error.message ||
+        error
+      }`
+
+    readinessElement.className =
+      'mine-state reserve-low'
+
+    transferButton.disabled = true
+
+    return {
+      ready: false,
+      error,
+    }
+  }
 }
 
 

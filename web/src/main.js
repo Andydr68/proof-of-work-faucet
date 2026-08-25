@@ -1,5 +1,8 @@
 import './style.css'
-import { runCctpTest } from './cctp.js'
+import {
+  runCctpTest,
+  runCctpPreflight,
+} from './cctp.js'
 
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ||
@@ -89,7 +92,7 @@ app.innerHTML = `
       <div class="card-title-row">
         <div>
           <h2>CCTP Bridge Test</h2>
-          <p>Base Sepolia → Solana Devnet</p>
+          <p>EVM testnets → Solana Devnet</p>
         </div>
 
         <button id="cctp-transfer">
@@ -143,9 +146,37 @@ app.innerHTML = `
           Solana Devnet
         </code>
 
+        <span>USDC balance</span>
+        <strong id="cctp-usdc-balance">
+          --
+        </strong>
+
+        <span>Native gas balance</span>
+        <strong id="cctp-native-balance">
+          --
+        </strong>
+
         <span>Circle fee</span>
         <strong id="cctp-fee">
           --
+        </strong>
+
+        <span>Total burn</span>
+        <strong id="cctp-total">
+          --
+        </strong>
+
+        <span>Max transferable</span>
+        <strong id="cctp-max">
+          --
+        </strong>
+
+        <span>Preflight</span>
+        <strong
+          id="cctp-readiness"
+          class="mine-state"
+        >
+          CHECKING...
         </strong>
       </div>
 
@@ -153,7 +184,7 @@ app.innerHTML = `
         id="cctp-status"
         style="margin-top:16px;"
       >
-        Ready — choose amount and transfer
+        Select network and amount
       </div>
     </section>
 
@@ -554,6 +585,21 @@ const cctpDestination =
 
 const cctpFee =
   document.querySelector('#cctp-fee')
+
+const cctpUsdcBalance =
+  document.querySelector('#cctp-usdc-balance')
+
+const cctpNativeBalance =
+  document.querySelector('#cctp-native-balance')
+
+const cctpTotal =
+  document.querySelector('#cctp-total')
+
+const cctpMax =
+  document.querySelector('#cctp-max')
+
+const cctpReadiness =
+  document.querySelector('#cctp-readiness')
 
 const button = document.querySelector('#connect')
 const backendStatus = document.querySelector('#backend-status')
@@ -1360,6 +1406,75 @@ setInterval(refreshBackendStatus, 2000)
 setInterval(refreshMinerWallet, 10000)
 setInterval(refreshPerformance, 10000)
 
+
+let cctpPreflightTimer = null
+let cctpPreflightGeneration = 0
+
+async function refreshCctpPreflight() {
+  const generation =
+    ++cctpPreflightGeneration
+
+  const result =
+    await runCctpPreflight({
+      networkElement: cctpNetwork,
+      amountElement: cctpAmount,
+      usdcBalanceElement:
+        cctpUsdcBalance,
+      nativeBalanceElement:
+        cctpNativeBalance,
+      feeElement: cctpFee,
+      totalElement: cctpTotal,
+      maxElement: cctpMax,
+      readinessElement:
+        cctpReadiness,
+      transferButton: cctpButton,
+    })
+
+  if (result?.ready) {
+    cctpStatus.textContent =
+      'Ready to transfer'
+  } else if (result?.error) {
+    cctpStatus.textContent =
+      `Preflight failed: ${
+        result.error.shortMessage ||
+        result.error.message ||
+        result.error
+      }`
+  } else if (
+    result?.reason ===
+    'wallet-not-connected'
+  ) {
+    cctpStatus.textContent =
+      'Connect MetaMask EVM to continue'
+  } else {
+    cctpStatus.textContent =
+      'Transfer unavailable — check preflight'
+  }
+
+  // Ignora risultati vecchi se nel frattempo
+  // l'utente ha cambiato rete/importo.
+  if (
+    generation !==
+    cctpPreflightGeneration
+  ) {
+    return null
+  }
+
+  return result
+}
+
+
+function scheduleCctpPreflight() {
+  clearTimeout(cctpPreflightTimer)
+
+  cctpPreflightTimer =
+    setTimeout(
+      refreshCctpPreflight,
+      350,
+    )
+}
+
+
 async function handleCctpTransfer() {
   cctpButton.disabled = true
 
@@ -1372,6 +1487,8 @@ async function handleCctpTransfer() {
       destinationElement: cctpDestination,
       feeElement: cctpFee,
     })
+
+    await refreshCctpPreflight()
   } catch {
     // Il messaggio completo viene già mostrato da cctp.js
   } finally {
@@ -1383,6 +1500,28 @@ cctpButton.addEventListener(
   'click',
   handleCctpTransfer
 )
+
+cctpNetwork.addEventListener(
+  'change',
+  scheduleCctpPreflight
+)
+
+cctpAmount.addEventListener(
+  'input',
+  scheduleCctpPreflight
+)
+
+window.ethereum?.on?.(
+  'accountsChanged',
+  scheduleCctpPreflight
+)
+
+window.ethereum?.on?.(
+  'chainChanged',
+  scheduleCctpPreflight
+)
+
+scheduleCctpPreflight()
 
 button.addEventListener('click', connectMetaMask)
 refreshButton.addEventListener('click', refreshBalance)
