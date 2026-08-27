@@ -238,14 +238,6 @@ impl DifficultyPerformance {
 
         raw_penalty * sample_confidence
     }
-
-    fn sol_per_second(&self) -> Option<f64> {
-        if self.total_seconds <= 0.0 {
-            None
-        } else {
-            Some((self.gross_lamports as f64 / 1e9) / self.total_seconds)
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
