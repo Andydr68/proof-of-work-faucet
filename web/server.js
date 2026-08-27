@@ -212,6 +212,12 @@ function parseMiningOutput(stdout) {
     ),
   ]
 
+  const stabilityMatches = [
+    ...stdout.matchAll(
+      /Stability: difficulty (\d+) \| penalty -([0-9.]+)% \| base ([0-9.]+) \| stable ([0-9.]+)/g
+    ),
+  ]
+
   const explorationMatches = [
     ...stdout.matchAll(
       /Exploration: difficulty (\d+) \| claims (\d+) \| bonus \+([0-9.]+)% \| base ([0-9.]+) \| adjusted ([0-9.]+)/g
@@ -263,6 +269,15 @@ function parseMiningOutput(stdout) {
         expectedSeconds: Number(match[3]),
         solPerSecond: Number(match[4]),
         solPerHour: Number(match[4]) * 3600,
+      })),
+
+      stability: stabilityMatches.map(match => ({
+        difficulty: Number(match[1]),
+        penaltyPercent: Number(match[2]),
+        baseScore: Number(match[3]),
+        stableScore: Number(match[4]),
+        stableSolPerHour:
+          Number(match[4]) * 3600,
       })),
 
       exploration: explorationMatches.map(match => ({
@@ -499,7 +514,7 @@ app.post('/api/mine', async (req, res) => {
   ]
 
   const child = spawn(
-    './target/debug/devnet-pow',
+    './target/release/devnet-pow',
     args,
     {
       cwd: REPO_ROOT,

@@ -443,6 +443,16 @@ app.innerHTML = `
           </div>
 
           <div>
+            <span>Stability penalty</span>
+            <strong id="algo-stability">--</strong>
+          </div>
+
+          <div>
+            <span>Stable SOL/hour</span>
+            <strong id="algo-stable-hour">--</strong>
+          </div>
+
+          <div>
             <span>Exploration bonus</span>
             <strong id="algo-exploration">--</strong>
           </div>
@@ -679,6 +689,8 @@ const algoBlended = document.querySelector('#algo-blended')
 const algoExpected = document.querySelector('#algo-expected')
 const algoSolSecond = document.querySelector('#algo-sol-second')
 const algoSolHour = document.querySelector('#algo-sol-hour')
+const algoStability = document.querySelector('#algo-stability')
+const algoStableHour = document.querySelector('#algo-stable-hour')
 const algoExploration = document.querySelector('#algo-exploration')
 const algoAdjusted = document.querySelector('#algo-adjusted')
 
@@ -984,6 +996,13 @@ async function mineOneReward() {
         )
       : null
 
+  const stability =
+    Array.isArray(algorithm.stability)
+      ? algorithm.stability.find(
+          item => item.difficulty === mining.difficulty
+        )
+      : null
+
   const exploration =
     Array.isArray(algorithm.exploration)
       ? algorithm.exploration.find(
@@ -991,7 +1010,12 @@ async function mineOneReward() {
         )
       : null
 
-  if (learning || profitability || exploration) {
+  if (
+    learning ||
+    profitability ||
+    stability ||
+    exploration
+  ) {
     algorithmCard.style.display = 'block'
 
     algoDifficulty.textContent =
@@ -1032,6 +1056,18 @@ async function mineOneReward() {
         ? `${profitability.solPerHour.toFixed(6)} SOL/h`
         : '--'
 
+    algoStability.textContent =
+      stability?.penaltyPercent != null
+        ? `-${stability.penaltyPercent.toFixed(1)}%`
+        : '0.0%'
+
+    algoStableHour.textContent =
+      stability?.stableSolPerHour != null
+        ? `${stability.stableSolPerHour.toFixed(6)} SOL/h`
+        : profitability?.solPerHour != null
+          ? `${profitability.solPerHour.toFixed(6)} SOL/h`
+          : '--'
+
     algoExploration.textContent =
       exploration?.bonusPercent != null
         ? `+${exploration.bonusPercent.toFixed(1)}%`
@@ -1040,7 +1076,11 @@ async function mineOneReward() {
     algoAdjusted.textContent =
       exploration?.adjustedScore != null
         ? exploration.adjustedScore.toFixed(9)
-        : 'Not active'
+        : stability?.stableScore != null
+          ? stability.stableScore.toFixed(9)
+          : profitability?.solPerSecond != null
+            ? profitability.solPerSecond.toFixed(9)
+            : 'Not active'
   }
 
   if (
