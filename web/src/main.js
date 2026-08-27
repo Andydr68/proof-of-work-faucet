@@ -433,12 +433,32 @@ app.innerHTML = `
           </div>
 
           <div>
-            <span>Estimated SOL/s</span>
+            <span>Expected overhead</span>
+            <strong id="algo-overhead">--</strong>
+          </div>
+
+          <div>
+            <span>Net reward</span>
+            <strong id="algo-net-reward">--</strong>
+          </div>
+
+          <div>
+            <span>Gross SOL/s</span>
+            <strong id="algo-gross-sol-second">--</strong>
+          </div>
+
+          <div>
+            <span>Net SOL/s</span>
             <strong id="algo-sol-second">--</strong>
           </div>
 
           <div>
-            <span>Estimated SOL/hour</span>
+            <span>Gross SOL/hour</span>
+            <strong id="algo-gross-sol-hour">--</strong>
+          </div>
+
+          <div>
+            <span>Net SOL/hour</span>
             <strong id="algo-sol-hour">--</strong>
           </div>
 
@@ -687,7 +707,13 @@ const algoConfidence = document.querySelector('#algo-confidence')
 const algoRobust = document.querySelector('#algo-robust')
 const algoBlended = document.querySelector('#algo-blended')
 const algoExpected = document.querySelector('#algo-expected')
+const algoOverhead = document.querySelector('#algo-overhead')
+const algoNetReward = document.querySelector('#algo-net-reward')
+const algoGrossSolSecond =
+  document.querySelector('#algo-gross-sol-second')
 const algoSolSecond = document.querySelector('#algo-sol-second')
+const algoGrossSolHour =
+  document.querySelector('#algo-gross-sol-hour')
 const algoSolHour = document.querySelector('#algo-sol-hour')
 const algoStability = document.querySelector('#algo-stability')
 const algoStableHour = document.querySelector('#algo-stable-hour')
@@ -1046,14 +1072,34 @@ async function mineOneReward() {
         ? `${profitability.expectedSeconds.toFixed(3)} s`
         : '--'
 
+    algoOverhead.textContent =
+      profitability?.overhead != null
+        ? `${profitability.overhead.toFixed(9)} SOL`
+        : '--'
+
+    algoNetReward.textContent =
+      profitability?.netReward != null
+        ? `${profitability.netReward.toFixed(9)} SOL`
+        : '--'
+
+    algoGrossSolSecond.textContent =
+      profitability?.grossSolPerSecond != null
+        ? `${profitability.grossSolPerSecond.toFixed(9)} SOL/s`
+        : '--'
+
     algoSolSecond.textContent =
-      profitability?.solPerSecond != null
-        ? `${profitability.solPerSecond.toFixed(9)} SOL/s`
+      profitability?.netSolPerSecond != null
+        ? `${profitability.netSolPerSecond.toFixed(9)} SOL/s`
+        : '--'
+
+    algoGrossSolHour.textContent =
+      profitability?.grossSolPerHour != null
+        ? `${profitability.grossSolPerHour.toFixed(6)} SOL/h`
         : '--'
 
     algoSolHour.textContent =
-      profitability?.solPerHour != null
-        ? `${profitability.solPerHour.toFixed(6)} SOL/h`
+      profitability?.netSolPerHour != null
+        ? `${profitability.netSolPerHour.toFixed(6)} SOL/h`
         : '--'
 
     algoStability.textContent =
@@ -1064,8 +1110,8 @@ async function mineOneReward() {
     algoStableHour.textContent =
       stability?.stableSolPerHour != null
         ? `${stability.stableSolPerHour.toFixed(6)} SOL/h`
-        : profitability?.solPerHour != null
-          ? `${profitability.solPerHour.toFixed(6)} SOL/h`
+        : profitability?.netSolPerHour != null
+          ? `${profitability.netSolPerHour.toFixed(6)} SOL/h`
           : '--'
 
     algoExploration.textContent =
@@ -1078,8 +1124,8 @@ async function mineOneReward() {
         ? exploration.adjustedScore.toFixed(9)
         : stability?.stableScore != null
           ? stability.stableScore.toFixed(9)
-          : profitability?.solPerSecond != null
-            ? profitability.solPerSecond.toFixed(9)
+          : profitability?.netSolPerSecond != null
+            ? profitability.netSolPerSecond.toFixed(9)
             : 'Not active'
   }
 

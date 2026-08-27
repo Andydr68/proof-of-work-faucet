@@ -208,7 +208,7 @@ function parseMiningOutput(stdout) {
 
   const profitMatches = [
     ...stdout.matchAll(
-      /Profit estimate: difficulty (\d+) \| reward ([0-9.]+) SOL \| ([0-9.]+)s expected \| ([0-9.]+) SOL\/s/g
+      /Profit estimate: difficulty (\d+) \| reward ([0-9.]+) SOL \| overhead ([0-9.]+) SOL \| net ([0-9.]+) SOL \| ([0-9.]+)s expected \| gross ([0-9.]+) SOL\/s \| net ([0-9.]+) SOL\/s/g
     ),
   ]
 
@@ -266,9 +266,15 @@ function parseMiningOutput(stdout) {
       profitability: profitMatches.map(match => ({
         difficulty: Number(match[1]),
         reward: Number(match[2]),
-        expectedSeconds: Number(match[3]),
-        solPerSecond: Number(match[4]),
-        solPerHour: Number(match[4]) * 3600,
+        overhead: Number(match[3]),
+        netReward: Number(match[4]),
+        expectedSeconds: Number(match[5]),
+        grossSolPerSecond: Number(match[6]),
+        netSolPerSecond: Number(match[7]),
+        grossSolPerHour:
+          Number(match[6]) * 3600,
+        netSolPerHour:
+          Number(match[7]) * 3600,
       })),
 
       stability: stabilityMatches.map(match => ({
@@ -330,10 +336,9 @@ function parseMiningOutput(stdout) {
         : null,
 
     overhead:
-      grossMatch && sessionCostMatch
+      sessionCostMatch
         ? Math.max(
-            Number(sessionCostMatch[1]) -
-            Number(grossMatch[1]),
+            Number(sessionCostMatch[1]),
             0,
           )
         : null,
