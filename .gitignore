@@ -12,4 +12,3 @@ test-ledger
 *.pre-*
 
 # Local learned mining performance state
-.devnet-pow-performance.json
