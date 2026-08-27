@@ -174,6 +174,71 @@ impl DifficultyPerformance {
         Some(kept.iter().sum::<f64>() / kept.len() as f64)
     }
 
+    fn variability_penalty(&self) -> f64 {
+        const MIN_VARIABILITY_SAMPLES: usize = 8;
+        const FULL_VARIABILITY_SAMPLES: usize = 40;
+        const MAX_VARIABILITY_PENALTY: f64 = 0.15;
+
+        let mut samples: Vec<f64> = self
+            .recent_seconds
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .collect();
+
+        if samples.len() < MIN_VARIABILITY_SAMPLES {
+            return 0.0;
+        }
+
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let median = if samples.len() % 2 == 0 {
+            let upper = samples.len() / 2;
+            (samples[upper - 1] + samples[upper]) / 2.0
+        } else {
+            samples[samples.len() / 2]
+        };
+
+        if median <= 0.0 {
+            return 0.0;
+        }
+
+        let mut deviations: Vec<f64> = samples.iter().map(|value| (value - median).abs()).collect();
+
+        deviations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let mad = if deviations.len() % 2 == 0 {
+            let upper = deviations.len() / 2;
+            (deviations[upper - 1] + deviations[upper]) / 2.0
+        } else {
+            deviations[deviations.len() / 2]
+        };
+
+        // Robust coefficient of variation.
+        // 1.4826 makes MAD comparable to standard deviation
+        // for approximately normal data.
+        let robust_cv = (1.4826 * mad / median).max(0.0);
+
+        // A robust CV of 1.0 or more reaches the full raw penalty.
+        let raw_penalty = (robust_cv * MAX_VARIABILITY_PENALTY).clamp(0.0, MAX_VARIABILITY_PENALTY);
+
+        // A volatility estimate based on very few observations
+        // should have limited influence.
+        //
+        // 8 samples  -> 0% influence
+        // 24 samples -> 50% influence
+        // 40+        -> 100% influence
+        let sample_confidence = if samples.len() >= FULL_VARIABILITY_SAMPLES {
+            1.0
+        } else {
+            let range = (FULL_VARIABILITY_SAMPLES - MIN_VARIABILITY_SAMPLES) as f64;
+
+            ((samples.len() - MIN_VARIABILITY_SAMPLES) as f64 / range).clamp(0.0, 1.0)
+        };
+
+        raw_penalty * sample_confidence
+    }
+
     fn sol_per_second(&self) -> Option<f64> {
         if self.total_seconds <= 0.0 {
             None
@@ -1070,6 +1135,24 @@ async fn select_best_faucet(
             }
         };
 
+        let variability_penalty = history
+            .difficulties
+            .get(&metadata.difficulty)
+            .map(|perf| perf.variability_penalty())
+            .unwrap_or(0.0);
+
+        let stability_adjusted_score = score * (1.0 - variability_penalty);
+
+        if variability_penalty > 0.0 {
+            println!(
+                "Stability: difficulty {} | penalty -{:.1}% | base {:.9} | stable {:.9}",
+                metadata.difficulty,
+                variability_penalty * 100.0,
+                score,
+                stability_adjusted_score
+            );
+        }
+
         // Controlled exploration:
         // poorly measured difficulties receive a small deterministic
         // optimism bonus, capped at MAX_EXPLORATION_BONUS.
@@ -1090,7 +1173,7 @@ async fn select_best_faucet(
                 * (1.0 - historical_claims as f64 / EXPLORATION_FULLY_KNOWN_CLAIMS as f64)
         };
 
-        let adjusted_score = score * (1.0 + exploration_bonus);
+        let adjusted_score = stability_adjusted_score * (1.0 + exploration_bonus);
 
         if exploration_bonus > 0.0 {
             println!(
