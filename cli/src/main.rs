@@ -256,6 +256,33 @@ struct PerformanceHistory {
     overhead_samples: Vec<f64>,
 }
 
+impl PerformanceHistory {
+    fn robust_overhead_per_reward(&self) -> Option<f64> {
+        let mut samples: Vec<f64> = self
+            .overhead_samples
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .collect();
+
+        if samples.is_empty() {
+            return None;
+        }
+
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let middle = samples.len() / 2;
+
+        let median = if samples.len() % 2 == 0 {
+            (samples[middle - 1] + samples[middle]) / 2.0
+        } else {
+            samples[middle]
+        };
+
+        Some(median)
+    }
+}
+
 fn performance_history_path() -> PathBuf {
     PathBuf::from(".devnet-pow-performance.json")
 }
@@ -541,6 +568,7 @@ async fn main() -> anyhow::Result<()> {
             let session_started = std::time::Instant::now();
             let starting_balance = payer_balance;
             let mut gross_rewards_lamports: u64 = 0;
+            let mut forwarded_lamports: u64 = 0;
             // difficulty -> (claims, total_seconds, gross_lamports)
             let mut performance_stats: BTreeMap<u8, (u64, f64, u64, Vec<f64>)> = BTreeMap::new();
 
@@ -745,6 +773,9 @@ async fn main() -> anyhow::Result<()> {
                                         match client.send_and_confirm_transaction(&forward_tx).await
                                         {
                                             Ok(forward_txid) => {
+                                                forwarded_lamports = forwarded_lamports
+                                                    .saturating_add(metadata.amount);
+
                                                 println!(
                                                     "Forwarded {} SOL to {}: {}",
                                                     reward, recipient, forward_txid
@@ -923,7 +954,8 @@ async fn main() -> anyhow::Result<()> {
             let final_balance = client.get_balance(&payer.pubkey()).await?;
             let elapsed = session_started.elapsed();
             let net_change_lamports = final_balance as i128 - starting_balance as i128;
-            let session_cost_lamports = gross_rewards_lamports as i128 - net_change_lamports;
+            let session_cost_lamports =
+                gross_rewards_lamports as i128 - net_change_lamports - forwarded_lamports as i128;
 
             println!();
             println!("=== Session summary ===");
@@ -950,6 +982,13 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
+            let session_overhead_per_reward = if rewards_received > 0 && session_cost_lamports >= 0
+            {
+                Some(session_cost_lamports as f64 / rewards_received as f64 / 1e9)
+            } else {
+                None
+            };
+
             println!();
             println!("=== Measured profitability ===");
             for (difficulty, (claims, seconds, lamports, _recent_seconds)) in &performance_stats {
@@ -958,18 +997,35 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 let avg_seconds = *seconds / *claims as f64;
+
                 let gross_sol = *lamports as f64 / 1e9;
-                let sol_per_second = gross_sol / *seconds;
-                let sol_per_hour = sol_per_second * 3600.0;
+
+                let gross_sol_per_second = gross_sol / *seconds;
+
+                let gross_sol_per_hour = gross_sol_per_second * 3600.0;
+
+                let overhead_per_reward = session_overhead_per_reward.unwrap_or(0.0);
+
+                let total_overhead = overhead_per_reward * *claims as f64;
+
+                let net_sol = (gross_sol - total_overhead).max(0.0);
+
+                let net_sol_per_second = net_sol / *seconds;
+
+                let net_sol_per_hour = net_sol_per_second * 3600.0;
 
                 println!(
-                    "Difficulty {} | claims {} | avg {:.3} s | gross {:.9} SOL | {:.9} SOL/s | {:.6} SOL/h",
+                    "Difficulty {} | claims {} | avg {:.3} s | gross {:.9} SOL | net {:.9} SOL | overhead/reward {:.9} SOL | gross {:.9} SOL/s | net {:.9} SOL/s | gross {:.6} SOL/h | net {:.6} SOL/h",
                     difficulty,
                     claims,
                     avg_seconds,
                     gross_sol,
-                    sol_per_second,
-                    sol_per_hour
+                    net_sol,
+                    overhead_per_reward,
+                    gross_sol_per_second,
+                    net_sol_per_second,
+                    gross_sol_per_hour,
+                    net_sol_per_hour
                 );
             }
 
@@ -991,6 +1047,25 @@ async fn main() -> anyhow::Result<()> {
                 if history.recent_seconds.len() > MAX_RECENT_SAMPLES {
                     let excess = history.recent_seconds.len() - MAX_RECENT_SAMPLES;
                     history.recent_seconds.drain(0..excess);
+                }
+            }
+
+            if let Some(overhead_per_reward) = session_overhead_per_reward {
+                if overhead_per_reward.is_finite() && overhead_per_reward >= 0.0 {
+                    persistent_history
+                        .overhead_samples
+                        .push(overhead_per_reward);
+
+                    const MAX_OVERHEAD_SAMPLES: usize = 50;
+
+                    if persistent_history.overhead_samples.len() > MAX_OVERHEAD_SAMPLES {
+                        let excess =
+                            persistent_history.overhead_samples.len() - MAX_OVERHEAD_SAMPLES;
+
+                        persistent_history.overhead_samples.drain(0..excess);
+                    }
+
+                    println!("Learned overhead: {:.9} SOL/reward", overhead_per_reward);
                 }
             }
 
@@ -1115,23 +1190,39 @@ async fn select_best_faucet(
             _ => theoretical_seconds,
         };
 
+        let expected_overhead = history.robust_overhead_per_reward().unwrap_or(0.0);
+
+        let net_reward_sol = (reward_sol - expected_overhead).max(0.0);
+
         let score = match predicted_seconds {
             Some(seconds) if seconds > 0.0 => {
-                let sol_per_second = reward_sol / seconds;
+                let gross_sol_per_second = reward_sol / seconds;
+
+                let net_sol_per_second = net_reward_sol / seconds;
 
                 println!(
-                    "Profit estimate: difficulty {} | reward {:.9} SOL | {:.3}s expected | {:.9} SOL/s",
+                    "Profit estimate: difficulty {} | reward {:.9} SOL | overhead {:.9} SOL | net {:.9} SOL | {:.3}s expected | gross {:.9} SOL/s | net {:.9} SOL/s",
                     metadata.difficulty,
                     reward_sol,
+                    expected_overhead,
+                    net_reward_sol,
                     seconds,
-                    sol_per_second
+                    gross_sol_per_second,
+                    net_sol_per_second
                 );
 
-                sol_per_second
+                net_sol_per_second
             }
             _ => {
                 // No sufficient measured history yet.
-                metadata.amount as f64 / 58_f64.powi(metadata.difficulty as i32)
+                let theoretical_score =
+                    metadata.amount as f64 / 58_f64.powi(metadata.difficulty as i32);
+
+                if reward_sol > 0.0 {
+                    theoretical_score * (net_reward_sol / reward_sol)
+                } else {
+                    0.0
+                }
             }
         };
 
