@@ -1084,6 +1084,33 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+fn adjusted_profitability_score(
+    reward_sol: f64,
+    expected_overhead: f64,
+    predicted_seconds: f64,
+    variability_penalty: f64,
+    exploration_bonus: f64,
+) -> f64 {
+    if !reward_sol.is_finite()
+        || !expected_overhead.is_finite()
+        || !predicted_seconds.is_finite()
+        || !variability_penalty.is_finite()
+        || !exploration_bonus.is_finite()
+        || reward_sol <= 0.0
+        || predicted_seconds <= 0.0
+    {
+        return 0.0;
+    }
+
+    let net_reward_sol = (reward_sol - expected_overhead).max(0.0);
+
+    let net_sol_per_second = net_reward_sol / predicted_seconds;
+
+    let stability_adjusted = net_sol_per_second * (1.0 - variability_penalty.clamp(0.0, 1.0));
+
+    stability_adjusted * (1.0 + exploration_bonus.max(0.0))
+}
+
 async fn select_best_faucet(
     client: &RpcClient,
     commitment: &CommitmentConfig,
@@ -1268,7 +1295,13 @@ async fn select_best_faucet(
                 * (1.0 - historical_claims as f64 / EXPLORATION_FULLY_KNOWN_CLAIMS as f64)
         };
 
-        let adjusted_score = stability_adjusted_score * (1.0 + exploration_bonus);
+        let adjusted_score = adjusted_profitability_score(
+            reward_sol,
+            expected_overhead,
+            predicted_seconds.unwrap_or(0.0),
+            variability_penalty,
+            exploration_bonus,
+        );
 
         if exploration_bonus > 0.0 {
             println!(
@@ -1399,4 +1432,81 @@ async fn get_inferred_faucets(
     }
 
     Ok(faucet_specs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f64, b: f64, eps: f64) {
+        assert!(
+            (a - b).abs() <= eps,
+            "expected {a} ≈ {b}, diff={}",
+            (a - b).abs()
+        );
+    }
+
+    #[test]
+    fn higher_net_profitability_wins() {
+        let fast = adjusted_profitability_score(0.020, 0.001, 10.0, 0.0, 0.0);
+
+        let slow = adjusted_profitability_score(0.020, 0.001, 20.0, 0.0, 0.0);
+
+        assert!(fast > slow);
+    }
+
+    #[test]
+    fn overhead_above_reward_produces_zero_score() {
+        let score = adjusted_profitability_score(0.001, 0.002, 10.0, 0.0, 0.0);
+
+        approx_eq(score, 0.0, 1e-12);
+    }
+
+    #[test]
+    fn stability_can_flip_a_close_ranking() {
+        let unstable = adjusted_profitability_score(0.020, 0.001, 10.0, 0.15, 0.0);
+
+        let stable = adjusted_profitability_score(0.020, 0.001, 11.0, 0.0, 0.0);
+
+        assert!(stable > unstable);
+    }
+
+    #[test]
+    fn exploration_can_break_a_near_tie() {
+        let known = adjusted_profitability_score(0.020, 0.001, 10.0, 0.0, 0.0);
+
+        let unknown = adjusted_profitability_score(0.020, 0.001, 10.5, 0.0, 0.15);
+
+        assert!(unknown > known);
+    }
+
+    #[test]
+    fn exploration_cannot_rescue_a_clearly_bad_option() {
+        let good = adjusted_profitability_score(0.020, 0.001, 10.0, 0.0, 0.0);
+
+        let bad = adjusted_profitability_score(0.020, 0.001, 1000.0, 0.0, 0.15);
+
+        assert!(good > bad);
+    }
+
+    #[test]
+    fn zero_exploration_leaves_score_unchanged() {
+        let score = adjusted_profitability_score(0.020, 0.001, 10.0, 0.10, 0.0);
+
+        let expected = ((0.020_f64 - 0.001_f64) / 10.0_f64) * 0.90_f64;
+
+        approx_eq(score, expected, 1e-12);
+    }
+
+    #[test]
+    fn robust_overhead_uses_median() {
+        let history = PerformanceHistory {
+            difficulties: BTreeMap::new(),
+            overhead_samples: vec![0.0009, 0.00091, 0.5],
+        };
+
+        let overhead = history.robust_overhead_per_reward().unwrap();
+
+        approx_eq(overhead, 0.00091, 1e-12);
+    }
 }
