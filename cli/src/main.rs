@@ -951,8 +951,12 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            let final_balance = client.get_balance(&payer.pubkey()).await?;
+            // Stop the mining timer before the final balance RPC.
+            // Balance retrieval is accounting overhead, not mining time.
             let elapsed = session_started.elapsed();
+
+            let final_balance = client.get_balance(&payer.pubkey()).await?;
+
             let net_change_lamports = final_balance as i128 - starting_balance as i128;
             let session_cost_lamports =
                 gross_rewards_lamports as i128 - net_change_lamports - forwarded_lamports as i128;
